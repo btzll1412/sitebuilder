@@ -2,6 +2,25 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useToast } from '../components/Toast';
 import * as api from '../api';
 
+const TIMEZONES = [
+  { value: 'America/New_York', label: 'Eastern Time (ET)' },
+  { value: 'America/Chicago', label: 'Central Time (CT)' },
+  { value: 'America/Denver', label: 'Mountain Time (MT)' },
+  { value: 'America/Los_Angeles', label: 'Pacific Time (PT)' },
+  { value: 'America/Anchorage', label: 'Alaska Time (AKT)' },
+  { value: 'Pacific/Honolulu', label: 'Hawaii Time (HT)' },
+  { value: 'America/Phoenix', label: 'Arizona (no DST)' },
+  { value: 'America/Puerto_Rico', label: 'Atlantic Time (AT)' },
+  { value: 'UTC', label: 'UTC' },
+  { value: 'Europe/London', label: 'London (GMT/BST)' },
+  { value: 'Europe/Paris', label: 'Paris (CET/CEST)' },
+  { value: 'Europe/Berlin', label: 'Berlin (CET/CEST)' },
+  { value: 'Asia/Tokyo', label: 'Tokyo (JST)' },
+  { value: 'Asia/Shanghai', label: 'Shanghai (CST)' },
+  { value: 'Asia/Dubai', label: 'Dubai (GST)' },
+  { value: 'Australia/Sydney', label: 'Sydney (AEST/AEDT)' },
+];
+
 export default function SettingsPanel() {
   const [settings, setSettings] = useState({});
   const [loading, setLoading] = useState(true);
@@ -109,15 +128,64 @@ export default function SettingsPanel() {
           </div>
         </section>
 
-        {/* Tax */}
+        {/* Background */}
         <section style={s.section}>
-          <h3 style={s.sectionTitle}>Tax</h3>
-          <div style={{ maxWidth: 300 }}>
+          <h3 style={s.sectionTitle}>Background</h3>
+          <div style={s.grid}>
+            <ColorField label="Background Color" value={settings.bg_color || '#0d0d0d'} onChange={v => update('bg_color', v)} />
+            <Field label="Background Image URL" value={settings.bg_image || ''} onChange={v => update('bg_image', v)} placeholder="https://... or /uploads/..." />
+          </div>
+          <div style={{ marginTop: 16 }}>
+            <label style={s.label}>Or Upload Image</label>
+            <input
+              type="file"
+              accept="image/*"
+              onChange={async (e) => {
+                const file = e.target.files?.[0];
+                if (file) {
+                  try {
+                    const result = await api.uploadFile(file);
+                    update('bg_image', result.url);
+                  } catch (err) {
+                    toast.error('Failed to upload image');
+                  }
+                }
+              }}
+              style={{ marginTop: 6 }}
+            />
+          </div>
+          {(settings.bg_image || settings.bg_color) && (
+            <div style={{ marginTop: 16 }}>
+              <label style={s.label}>Preview</label>
+              <div style={{
+                marginTop: 8,
+                width: '100%',
+                height: 120,
+                borderRadius: 8,
+                background: settings.bg_image
+                  ? `url(${settings.bg_image}) center/cover`
+                  : (settings.bg_color || '#0d0d0d'),
+                border: '1px solid var(--admin-border)',
+              }} />
+            </div>
+          )}
+        </section>
+
+        {/* Tax & Timezone */}
+        <section style={s.section}>
+          <h3 style={s.sectionTitle}>Tax & Localization</h3>
+          <div style={s.grid}>
             <Field
               label="Tax Rate (%)"
               value={settings.tax_rate || '8.25'}
               onChange={v => update('tax_rate', v)}
               type="number"
+            />
+            <SelectField
+              label="Timezone"
+              value={settings.timezone || 'America/New_York'}
+              onChange={v => update('timezone', v)}
+              options={TIMEZONES}
             />
           </div>
         </section>
@@ -230,6 +298,23 @@ function ColorField({ label, value, onChange }) {
   );
 }
 
+function SelectField({ label, value, onChange, options }) {
+  return (
+    <div style={s.field}>
+      <label style={s.label}>{label}</label>
+      <select
+        value={value}
+        onChange={e => onChange(e.target.value)}
+        style={s.select}
+      >
+        {options.map(opt => (
+          <option key={opt.value} value={opt.value}>{opt.label}</option>
+        ))}
+      </select>
+    </div>
+  );
+}
+
 const s = {
   header: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 28 },
   title: { fontFamily: 'var(--font-display)', fontSize: '1.75rem', fontWeight: 600, color: 'var(--admin-text)', marginBottom: 4 },
@@ -246,6 +331,7 @@ const s = {
   field: { display: 'flex', flexDirection: 'column', gap: 6 },
   label: { fontSize: '0.75rem', fontWeight: 500, color: 'var(--admin-text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em' },
   input: { padding: '12px 14px', fontSize: '0.9rem', border: '1.5px solid var(--admin-border)', borderRadius: 'var(--radius-md)', background: 'var(--admin-surface)', color: 'var(--admin-text)', outline: 'none', width: '100%', transition: 'border-color 0.2s' },
+  select: { padding: '12px 14px', fontSize: '0.9rem', border: '1.5px solid var(--admin-border)', borderRadius: 'var(--radius-md)', background: 'var(--admin-surface)', color: 'var(--admin-text)', outline: 'none', width: '100%', cursor: 'pointer' },
   inputError: { borderColor: '#C2185B', boxShadow: '0 0 0 3px rgba(194, 24, 91, 0.1)' },
   errorText: { fontSize: '0.75rem', color: '#C2185B', fontWeight: 500 },
 

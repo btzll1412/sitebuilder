@@ -84,6 +84,10 @@ export async function getCategories() {
   return request('/api/products/categories');
 }
 
+export async function getProduct(id) {
+  return request(`/api/products/${id}`);
+}
+
 export async function createProduct(formData) {
   const resp = await fetch(`${BASE}/api/products`, {
     method: 'POST',

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useToast } from '../components/Toast';
 import * as api from '../api';
 
@@ -7,7 +7,14 @@ export default function AdminLogin({ onLogin }) {
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState({});
+  const [logoText, setLogoText] = useState('');
   const toast = useToast();
+
+  useEffect(() => {
+    api.getSettings().then(data => {
+      setLogoText(data.logo_text || 'Store');
+    }).catch(() => {});
+  }, []);
 
   const validate = () => {
     const e = {};
@@ -41,7 +48,7 @@ export default function AdminLogin({ onLogin }) {
     <div style={styles.wrapper}>
       <div style={styles.card}>
         <div style={styles.header}>
-          <h1 style={styles.logo}>LUXE</h1>
+          <h1 style={styles.logo}>{logoText}</h1>
           <p style={styles.subtitle}>Store Administration</p>
         </div>
 
