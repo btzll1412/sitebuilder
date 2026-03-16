@@ -24,7 +24,7 @@ export default function CartDrawer({ settings }) {
 
   useEffect(() => {
     if (!isOpen) {
-      setTimeout(() => {
+      const timer = setTimeout(() => {
         setStep('cart');
         setResult(null);
         setCardName('');
@@ -33,6 +33,7 @@ export default function CartDrawer({ settings }) {
         setCardCvv('');
         setErrors({});
       }, 300);
+      return () => clearTimeout(timer);
     }
   }, [isOpen]);
 

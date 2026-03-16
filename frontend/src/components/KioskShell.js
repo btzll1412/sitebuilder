@@ -10,8 +10,14 @@ export default function KioskShell() {
   const [pages, setPages] = useState([]);
 
   useEffect(() => {
-    api.getSettings().then(setSettings).catch(() => {});
-    api.getPages().then(setPages).catch(() => {});
+    let cancelled = false;
+    api.getSettings()
+      .then(data => { if (!cancelled) setSettings(data); })
+      .catch(() => {});
+    api.getPages()
+      .then(data => { if (!cancelled) setPages(data); })
+      .catch(() => {});
+    return () => { cancelled = true; };
   }, []);
 
   return (
