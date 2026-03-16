@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { useCart } from '../CartContext';
 import * as api from '../api';
@@ -17,31 +17,35 @@ export default function ProductDetail({ settings }) {
   const brand = settings?.primary_color || '#C2185B';
   const lowStockThreshold = product?.low_stock_threshold || 5;
 
-  // Get available stock for current selection
-  const getAvailableStock = () => {
-    if (!product) return 0;
-    const hasVariants = product.variants && product.variants.length > 0;
-    if (hasVariants && selectedVariant) {
-      return selectedVariant.stock_qty || 0;
+  // Calculate stock values with explicit dependencies using useMemo
+  const stockInfo = useMemo(() => {
+    if (!product) {
+      return { availableStock: 0, cartQty: 0, maxCanAdd: 0, isLowStock: false, isOutOfStock: true };
     }
-    return product.stock_qty || 0;
-  };
 
-  // Get how many are already in cart for this product/variant
-  const getCartQuantity = () => {
-    if (!product) return 0;
+    // Get available stock
     const hasVariants = product.variants && product.variants.length > 0;
+    let availableStock = 0;
+    if (hasVariants && selectedVariant) {
+      availableStock = selectedVariant.stock_qty || 0;
+    } else {
+      availableStock = product.stock_qty || 0;
+    }
+
+    // Get cart quantity for this product/variant
     const variantName = hasVariants && selectedVariant ? selectedVariant.name : null;
     const cartKey = variantName ? `${product.id}_${variantName}` : `${product.id}`;
     const cartItem = cartItems.find(i => i.cartKey === cartKey);
-    return cartItem ? cartItem.qty : 0;
-  };
+    const cartQty = cartItem ? cartItem.qty : 0;
 
-  const availableStock = getAvailableStock();
-  const cartQty = getCartQuantity();
-  const maxCanAdd = Math.max(0, availableStock - cartQty);
-  const isLowStock = availableStock > 0 && availableStock <= lowStockThreshold;
-  const isOutOfStock = availableStock <= 0;
+    const maxCanAdd = Math.max(0, availableStock - cartQty);
+    const isLowStock = availableStock > 0 && availableStock <= lowStockThreshold;
+    const isOutOfStock = availableStock <= 0;
+
+    return { availableStock, cartQty, maxCanAdd, isLowStock, isOutOfStock };
+  }, [product, selectedVariant, cartItems, lowStockThreshold]);
+
+  const { availableStock, cartQty, maxCanAdd, isLowStock, isOutOfStock } = stockInfo;
 
   useEffect(() => {
     setLoading(true);
@@ -66,6 +70,15 @@ export default function ProductDetail({ settings }) {
   useEffect(() => {
     setQuantity(1);
   }, [selectedVariant]);
+
+  // Adjust quantity if it exceeds available stock (e.g., after cart changes)
+  useEffect(() => {
+    if (maxCanAdd > 0 && quantity > maxCanAdd) {
+      setQuantity(maxCanAdd);
+    } else if (maxCanAdd > 0 && quantity === 0) {
+      setQuantity(1);
+    }
+  }, [maxCanAdd, quantity]);
 
   const handleVariantSelect = (variant) => {
     if ((variant.stock_qty || 0) <= 0) return; // Can't select out-of-stock
