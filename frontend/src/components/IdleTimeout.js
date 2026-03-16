@@ -14,6 +14,7 @@ export default function IdleTimeout({ settings }) {
   const warningTimerRef = useRef(null);
   const countdownRef = useRef(null);
   const showWarningRef = useRef(showWarning);
+  const justTimedOutRef = useRef(false);
 
   // Keep ref in sync with state
   useEffect(() => {
@@ -61,18 +62,24 @@ export default function IdleTimeout({ settings }) {
         // Auto-redirect after warning
         warningTimerRef.current = setTimeout(() => {
           clearTimers();
+          justTimedOutRef.current = true; // Mark that we just timed out
           clearCart();
           closeCart();
           setShowWarning(false);
           navigate('/');
+
+          // Reset the flag after a delay so next activity starts timer
+          setTimeout(() => {
+            justTimedOutRef.current = false;
+          }, 2000);
         }, warningDuration * 1000);
       }, screenTimeout);
     };
 
     // Handle user activity
     const handleActivity = () => {
-      // Only reset if warning is NOT showing
-      if (!showWarningRef.current) {
+      // Don't restart timer if warning is showing or just timed out
+      if (!showWarningRef.current && !justTimedOutRef.current) {
         startTimer();
       }
     };
