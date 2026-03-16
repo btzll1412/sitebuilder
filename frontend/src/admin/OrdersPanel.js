@@ -5,19 +5,40 @@ import * as api from '../api';
 export default function OrdersPanel() {
   const [orders, setOrders] = useState([]);
   const [stats, setStats] = useState(null);
+  const [settings, setSettings] = useState({});
   const [loading, setLoading] = useState(true);
   const [expandedOrder, setExpandedOrder] = useState(null);
   const toast = useToast();
 
+  const timezone = settings.timezone || 'America/New_York';
+
+  const formatDate = (dateStr) => {
+    try {
+      const date = new Date(dateStr + 'Z'); // Assume UTC from backend
+      return date.toLocaleString('en-US', {
+        timeZone: timezone,
+        month: 'short',
+        day: 'numeric',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+      });
+    } catch {
+      return dateStr;
+    }
+  };
+
   const load = useCallback(async () => {
     try {
       setLoading(true);
-      const [ordersData, statsData] = await Promise.all([
+      const [ordersData, statsData, settingsData] = await Promise.all([
         api.getOrders(),
         api.getOrderStats(),
+        api.getAdminSettings(),
       ]);
       setOrders(ordersData);
       setStats(statsData);
+      setSettings(settingsData);
     } catch (err) {
       toast.error(err.message);
     } finally {
@@ -75,12 +96,7 @@ export default function OrdersPanel() {
               >
                 <div style={s.orderLeft}>
                   <span style={s.orderId}>#{order.id}</span>
-                  <span style={s.orderDate}>
-                    {new Date(order.created_at).toLocaleDateString('en-US', {
-                      month: 'short', day: 'numeric', year: 'numeric',
-                      hour: '2-digit', minute: '2-digit',
-                    })}
-                  </span>
+                  <span style={s.orderDate}>{formatDate(order.created_at)}</span>
                 </div>
                 <div style={s.orderRight}>
                   <span style={{

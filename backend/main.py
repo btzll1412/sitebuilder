@@ -192,9 +192,14 @@ def _seed_data(cur: sqlite3.Cursor):
         "tax_rate": "8.25",
         "primary_color": "#C2185B",
         "accent_color": "#C2185B",
+        "bg_color": "#0d0d0d",
+        "surface_color": "#141414",
+        "card_color": "#1c1c1c",
+        "text_color": "#f5f0eb",
         "usaepay_key": "",
         "usaepay_pin": "",
         "usaepay_sandbox": "1",
+        "timezone": "America/New_York",
     }
     for k, v in defaults.items():
         cur.execute(
@@ -404,6 +409,25 @@ async def get_categories():
             conn.close()
     except Exception:
         raise HTTPException(status_code=500, detail="Failed to fetch categories")
+
+
+@app.get("/api/products/{product_id}")
+async def get_product(product_id: int):
+    try:
+        conn = get_db()
+        try:
+            row = conn.execute(
+                "SELECT * FROM products WHERE id = ?", (product_id,)
+            ).fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="Product not found")
+            return dict(row)
+        finally:
+            conn.close()
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(status_code=500, detail="Failed to fetch product")
 
 
 @app.post("/api/products")
@@ -684,7 +708,8 @@ async def delete_page(page_id: int, admin_id: int = Depends(verify_token)):
 # ─── Settings Routes ────────────────────────────────────────────────────────
 
 SAFE_SETTINGS = [
-    "site_name", "logo_text", "tax_rate", "primary_color", "accent_color"
+    "site_name", "logo_text", "tax_rate", "primary_color", "accent_color",
+    "bg_color", "bg_image", "surface_color", "card_color", "text_color", "timezone"
 ]
 ALL_SETTINGS = SAFE_SETTINGS + ["usaepay_key", "usaepay_pin", "usaepay_sandbox"]
 

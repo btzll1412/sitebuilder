@@ -18,11 +18,18 @@ export default function AdminApp() {
   const [token, setToken] = useState(localStorage.getItem('admin_token'));
   const [activeTab, setActiveTab] = useState('products');
   const [username, setUsername] = useState(localStorage.getItem('admin_username') || '');
+  const [logoText, setLogoText] = useState('');
   const toast = useToast();
 
   useEffect(() => {
     document.body.classList.add('admin-mode');
     return () => document.body.classList.remove('admin-mode');
+  }, []);
+
+  useEffect(() => {
+    api.getSettings().then(data => {
+      setLogoText(data.logo_text || 'Store');
+    }).catch(() => {});
   }, []);
 
   const handleLogin = (data) => {
@@ -59,7 +66,7 @@ export default function AdminApp() {
     <div style={styles.shell}>
       <aside style={styles.sidebar}>
         <div style={styles.sidebarHeader}>
-          <h1 style={styles.sidebarLogo}>LUXE</h1>
+          <h1 style={styles.sidebarLogo}>{logoText}</h1>
           <span style={styles.sidebarBadge}>Admin</span>
         </div>
 

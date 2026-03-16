@@ -5,6 +5,7 @@ import * as api from '../api';
 const BLOCK_TYPES = [
   { type: 'hero', label: 'Hero Banner', icon: '▮', desc: 'Full-width banner with title, subtitle, CTA' },
   { type: 'product_grid', label: 'Product Grid', icon: '▦', desc: 'Grid of product cards from your store' },
+  { type: 'category_shop', label: 'Category Shop', icon: '◫', desc: 'Full shop with category sidebar navigation' },
   { type: 'text', label: 'Text Block', icon: '¶', desc: 'Heading and body copy' },
   { type: 'banner', label: 'Promo Banner', icon: '▬', desc: 'Single-line promotional strip' },
   { type: 'image', label: 'Image', icon: '◻', desc: 'Full-width or contained image' },
@@ -23,6 +24,7 @@ function defaultProps(type) {
   switch (type) {
     case 'hero': return { title: 'Your Heading', subtitle: 'A compelling subtitle goes here.', cta: 'Shop Now', badge: '', bg_color: '#0d0d0d', bg_image: '' };
     case 'product_grid': return { title: 'Products', category: 'all', limit: 6, columns: 3 };
+    case 'category_shop': return { title: 'Shop Our Collection', show_sidebar: true };
     case 'text': return { title: 'Section Title', body: 'Your content here...', align: 'left' };
     case 'banner': return { text: 'Free shipping on orders over $50', bg_color: '#C2185B', text_color: '#ffffff' };
     case 'image': return { src: '', alt: '', caption: '', width: 'contained' };
@@ -47,6 +49,8 @@ export default function PageBuilder() {
   const [newPageSlug, setNewPageSlug] = useState('');
   const [newPageTitle, setNewPageTitle] = useState('');
   const [showNewPage, setShowNewPage] = useState(false);
+  const [draggedIndex, setDraggedIndex] = useState(null);
+  const [dragOverIndex, setDragOverIndex] = useState(null);
   const toast = useToast();
 
   const loadPages = useCallback(async () => {
@@ -162,6 +166,42 @@ export default function PageBuilder() {
     ));
   };
 
+  const handleDragStart = (e, index) => {
+    setDraggedIndex(index);
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', index);
+  };
+
+  const handleDragOver = (e, index) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    setDragOverIndex(index);
+  };
+
+  const handleDragLeave = () => {
+    setDragOverIndex(null);
+  };
+
+  const handleDrop = (e, dropIndex) => {
+    e.preventDefault();
+    if (draggedIndex === null || draggedIndex === dropIndex) {
+      setDraggedIndex(null);
+      setDragOverIndex(null);
+      return;
+    }
+    const newBlocks = [...blocks];
+    const [draggedBlock] = newBlocks.splice(draggedIndex, 1);
+    newBlocks.splice(dropIndex, 0, draggedBlock);
+    setBlocks(newBlocks);
+    setDraggedIndex(null);
+    setDragOverIndex(null);
+  };
+
+  const handleDragEnd = () => {
+    setDraggedIndex(null);
+    setDragOverIndex(null);
+  };
+
   // ─── Page List View ─────────────────────────────────────────────────────
 
   if (!activePage) {
@@ -258,7 +298,7 @@ export default function PageBuilder() {
             onClick={() => setPreview(!preview)}
             style={{ ...s.previewBtn, ...(preview ? s.previewBtnActive : {}) }}
           >
-            {preview ? '✎ Edit' : '◉ Preview'}
+            {preview ? '◧ Split View' : '◉ Full Preview'}
           </button>
           <button
             onClick={savePage}
@@ -271,6 +311,7 @@ export default function PageBuilder() {
       </div>
 
       {preview ? (
+        /* Full Preview Mode */
         <div style={s.previewContainer}>
           <div style={s.previewFrame}>
             {blocks.length === 0 ? (
@@ -285,58 +326,89 @@ export default function PageBuilder() {
           </div>
         </div>
       ) : (
-        <div style={s.canvas}>
-          {blocks.map((block, index) => (
-            <div
-              key={block.id}
-              style={{
-                ...s.blockItem,
-                ...(activeBlock === block.id ? s.blockItemActive : {}),
-              }}
-            >
-              <div style={s.blockHeader} onClick={() => setActiveBlock(activeBlock === block.id ? null : block.id)}>
-                <div style={s.blockLabel}>
-                  <span style={s.blockIcon}>{BLOCK_TYPES.find(t => t.type === block.type)?.icon || '?'}</span>
-                  <span style={s.blockType}>{BLOCK_TYPES.find(t => t.type === block.type)?.label || block.type}</span>
-                </div>
-                <div style={s.blockActions}>
-                  <button onClick={e => { e.stopPropagation(); moveBlock(index, -1); }} disabled={index === 0} style={{ ...s.blockBtn, opacity: index === 0 ? 0.3 : 1 }}>↑</button>
-                  <button onClick={e => { e.stopPropagation(); moveBlock(index, 1); }} disabled={index === blocks.length - 1} style={{ ...s.blockBtn, opacity: index === blocks.length - 1 ? 0.3 : 1 }}>↓</button>
-                  <button onClick={e => { e.stopPropagation(); deleteBlock(block.id); }} style={{ ...s.blockBtn, color: '#e57373' }}>✕</button>
-                </div>
-              </div>
+        /* Split View - Editor + Live Preview */
+        <div style={s.splitContainer}>
+          {/* Left: Editor */}
+          <div style={s.editorPane}>
+            <div style={s.canvas}>
+              {blocks.map((block, index) => (
+                <div
+                  key={block.id}
+                  draggable
+                  onDragStart={e => handleDragStart(e, index)}
+                  onDragOver={e => handleDragOver(e, index)}
+                  onDragLeave={handleDragLeave}
+                  onDrop={e => handleDrop(e, index)}
+                  onDragEnd={handleDragEnd}
+                  style={{
+                    ...s.blockItem,
+                    ...(activeBlock === block.id ? s.blockItemActive : {}),
+                    ...(draggedIndex === index ? s.blockDragging : {}),
+                    ...(dragOverIndex === index && draggedIndex !== index ? s.blockDragOver : {}),
+                  }}
+                >
+                  <div style={s.blockHeader} onClick={() => setActiveBlock(activeBlock === block.id ? null : block.id)}>
+                    <div style={s.blockLabel}>
+                      <span style={s.dragHandle}>⋮⋮</span>
+                      <span style={s.blockIcon}>{BLOCK_TYPES.find(t => t.type === block.type)?.icon || '?'}</span>
+                      <span style={s.blockType}>{BLOCK_TYPES.find(t => t.type === block.type)?.label || block.type}</span>
+                    </div>
+                    <div style={s.blockActions}>
+                      <button onClick={e => { e.stopPropagation(); moveBlock(index, -1); }} disabled={index === 0} style={{ ...s.blockBtn, opacity: index === 0 ? 0.3 : 1 }}>↑</button>
+                      <button onClick={e => { e.stopPropagation(); moveBlock(index, 1); }} disabled={index === blocks.length - 1} style={{ ...s.blockBtn, opacity: index === blocks.length - 1 ? 0.3 : 1 }}>↓</button>
+                      <button onClick={e => { e.stopPropagation(); deleteBlock(block.id); }} style={{ ...s.blockBtn, color: '#e57373' }}>✕</button>
+                    </div>
+                  </div>
 
-              {activeBlock === block.id && (
-                <div style={s.blockEditor}>
-                  <BlockEditor
-                    block={block}
-                    onUpdate={(props) => updateBlockProps(block.id, props)}
-                  />
+                  {activeBlock === block.id && (
+                    <div style={s.blockEditor}>
+                      <BlockEditor
+                        block={block}
+                        onUpdate={(props) => updateBlockProps(block.id, props)}
+                      />
+                    </div>
+                  )}
+                </div>
+              ))}
+
+              <button
+                onClick={() => setShowPalette(!showPalette)}
+                style={s.addBlockBtn}
+              >
+                + Add Block
+              </button>
+
+              {showPalette && (
+                <div style={s.palette}>
+                  {BLOCK_TYPES.map(bt => (
+                    <button key={bt.type} onClick={() => addBlock(bt.type)} style={s.paletteItem}>
+                      <span style={s.paletteIcon}>{bt.icon}</span>
+                      <div>
+                        <div style={s.paletteName}>{bt.label}</div>
+                        <div style={s.paletteDesc}>{bt.desc}</div>
+                      </div>
+                    </button>
+                  ))}
                 </div>
               )}
             </div>
-          ))}
+          </div>
 
-          <button
-            onClick={() => setShowPalette(!showPalette)}
-            style={s.addBlockBtn}
-          >
-            + Add Block
-          </button>
-
-          {showPalette && (
-            <div style={s.palette}>
-              {BLOCK_TYPES.map(bt => (
-                <button key={bt.type} onClick={() => addBlock(bt.type)} style={s.paletteItem}>
-                  <span style={s.paletteIcon}>{bt.icon}</span>
-                  <div>
-                    <div style={s.paletteName}>{bt.label}</div>
-                    <div style={s.paletteDesc}>{bt.desc}</div>
-                  </div>
-                </button>
-              ))}
+          {/* Right: Live Preview */}
+          <div style={s.previewPane}>
+            <div style={s.previewPaneHeader}>Live Preview</div>
+            <div style={s.previewPaneContent}>
+              {blocks.length === 0 ? (
+                <div style={{ padding: 40, textAlign: 'center', color: '#a89f96' }}>
+                  <p>Add blocks to see preview</p>
+                </div>
+              ) : (
+                blocks.map(block => (
+                  <BlockPreview key={block.id} block={block} />
+                ))
+              )}
             </div>
-          )}
+          </div>
         </div>
       )}
     </div>
@@ -425,6 +497,25 @@ function BlockEditor({ block, onUpdate }) {
           { value: 3, label: '3 Columns' },
           { value: 4, label: '4 Columns' },
         ])}
+      </>);
+    case 'category_shop':
+      return (<>
+        {field('Title', 'title')}
+        <div style={s.editorField}>
+          <label style={s.editorLabel}>Show Category Sidebar</label>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
+            <input
+              type="checkbox"
+              checked={props.show_sidebar !== false}
+              onChange={e => onUpdate({ show_sidebar: e.target.checked })}
+              style={{ width: 18, height: 18 }}
+            />
+            <span style={{ fontSize: '0.88rem', color: 'var(--admin-text)' }}>Enable sidebar navigation</span>
+          </label>
+        </div>
+        <p style={{ fontSize: '0.8rem', color: 'var(--admin-text-hint)', marginTop: 8 }}>
+          This block displays all products grouped by category with a sticky sidebar for navigation.
+        </p>
       </>);
     case 'text':
       return (<>
@@ -597,6 +688,32 @@ function BlockPreview({ block }) {
           </div>
         </div>
       );
+    case 'category_shop':
+      return (
+        <div style={{ display: 'flex', background: '#0d0d0d', minHeight: 300 }}>
+          {p.show_sidebar !== false && (
+            <div style={{ width: 180, background: '#141414', borderRight: '1px solid #252525', padding: '24px 0' }}>
+              <div style={{ padding: '0 20px 16px', fontSize: '0.7rem', fontWeight: 600, color: '#a89f96', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Categories</div>
+              {['Lips', 'Eyes', 'Face'].map((cat, i) => (
+                <div key={cat} style={{ padding: '12px 20px', fontSize: '0.85rem', color: i === 0 ? '#C2185B' : '#a89f96', background: i === 0 ? '#1c1c1c' : 'transparent', borderLeft: i === 0 ? '3px solid #C2185B' : '3px solid transparent' }}>{cat}</div>
+              ))}
+            </div>
+          )}
+          <div style={{ flex: 1, padding: '40px 32px' }}>
+            <h2 style={{ fontFamily: 'var(--font-display)', fontSize: '1.5rem', color: '#C2185B', marginBottom: 24, paddingBottom: 16, borderBottom: '1px solid #252525' }}>{p.title || 'Category Name'}</h2>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16 }}>
+              {Array.from({ length: 3 }).map((_, i) => (
+                <div key={i} style={{ background: '#1c1c1c', borderRadius: 10, aspectRatio: '1/1' }}>
+                  <div style={{ padding: 12, marginTop: 'auto' }}>
+                    <div style={{ height: 8, background: '#252525', borderRadius: 4, marginBottom: 6, width: '60%' }} />
+                    <div style={{ height: 6, background: '#252525', borderRadius: 4, width: '35%' }} />
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      );
     case 'text':
       return (
         <div style={{ padding: '48px 40px', background: '#0d0d0d', textAlign: p.align || 'left' }}>
@@ -712,10 +829,20 @@ const s = {
   previewContainer: { background: '#0d0d0d', borderRadius: 'var(--radius-lg)', overflow: 'hidden', border: '1px solid var(--admin-border)' },
   previewFrame: { maxWidth: 1024, margin: '0 auto' },
 
+  // Split View
+  splitContainer: { display: 'flex', gap: 20, alignItems: 'flex-start' },
+  editorPane: { flex: 1, minWidth: 0 },
+  previewPane: { width: 400, flexShrink: 0, position: 'sticky', top: 20, background: '#0d0d0d', borderRadius: 'var(--radius-lg)', overflow: 'hidden', border: '1px solid var(--admin-border)', maxHeight: 'calc(100vh - 140px)' },
+  previewPaneHeader: { padding: '12px 16px', fontSize: '0.75rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.08em', color: '#a89f96', background: '#141414', borderBottom: '1px solid #252525' },
+  previewPaneContent: { overflowY: 'auto', maxHeight: 'calc(100vh - 190px)' },
+
   // Canvas
   canvas: { display: 'flex', flexDirection: 'column', gap: 8 },
-  blockItem: { background: 'var(--admin-card)', borderRadius: 'var(--radius-md)', border: '1.5px solid var(--admin-border)', overflow: 'hidden', transition: 'border-color 0.15s' },
+  blockItem: { background: 'var(--admin-card)', borderRadius: 'var(--radius-md)', border: '1.5px solid var(--admin-border)', overflow: 'hidden', transition: 'border-color 0.15s, opacity 0.15s, transform 0.15s', cursor: 'grab' },
   blockItemActive: { borderColor: 'var(--brand)' },
+  blockDragging: { opacity: 0.5, transform: 'scale(0.98)' },
+  blockDragOver: { borderColor: 'var(--brand)', borderStyle: 'dashed', background: 'var(--brand-light)' },
+  dragHandle: { color: 'var(--admin-text-hint)', fontSize: '0.9rem', cursor: 'grab', marginRight: 4, letterSpacing: '-2px' },
   blockHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '14px 18px', cursor: 'pointer', minHeight: 48 },
   blockLabel: { display: 'flex', alignItems: 'center', gap: 10 },
   blockIcon: { fontSize: '1rem', width: 24, textAlign: 'center', color: 'var(--admin-text-hint)' },

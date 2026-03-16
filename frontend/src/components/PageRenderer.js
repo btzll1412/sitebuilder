@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
 import { useCart } from '../CartContext';
 import * as api from '../api';
 
@@ -59,6 +60,7 @@ function RenderBlock({ block, settings }) {
   switch (type) {
     case 'hero': return <HeroBlock p={p} brand={brand} />;
     case 'product_grid': return <ProductGridBlock p={p} brand={brand} />;
+    case 'category_shop': return <CategoryShopBlock p={p} brand={brand} />;
     case 'text': return <TextBlock p={p} />;
     case 'banner': return <BannerBlock p={p} />;
     case 'image': return <ImageBlock p={p} />;
@@ -74,6 +76,8 @@ function RenderBlock({ block, settings }) {
 // ─── Hero Block ────────────────────────────────────────────────────────────
 
 function HeroBlock({ p, brand }) {
+  const navigate = useNavigate();
+
   return (
     <section style={{
       position: 'relative',
@@ -123,21 +127,23 @@ function HeroBlock({ p, brand }) {
           {p.subtitle}
         </p>
         {p.cta && (
-          <button style={{
-            display: 'inline-block',
-            padding: '16px 44px',
-            background: brand,
-            color: '#fff',
-            fontFamily: 'var(--font-body)',
-            fontSize: '0.88rem',
-            fontWeight: 600,
-            letterSpacing: '0.06em',
-            textTransform: 'uppercase',
-            borderRadius: 'var(--radius-md)',
-            border: 'none',
-            cursor: 'pointer',
-            transition: 'transform 0.2s, box-shadow 0.2s',
-          }}>
+          <button
+            onClick={() => navigate('/shop')}
+            style={{
+              display: 'inline-block',
+              padding: '16px 44px',
+              background: brand,
+              color: '#fff',
+              fontFamily: 'var(--font-body)',
+              fontSize: '0.88rem',
+              fontWeight: 600,
+              letterSpacing: '0.06em',
+              textTransform: 'uppercase',
+              borderRadius: 'var(--radius-md)',
+              border: 'none',
+              cursor: 'pointer',
+              transition: 'transform 0.2s, box-shadow 0.2s',
+            }}>
             {p.cta}
           </button>
         )}
@@ -151,7 +157,8 @@ function HeroBlock({ p, brand }) {
 function ProductGridBlock({ p, brand }) {
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
-  const { addItem, openCart } = useCart();
+  const [addedId, setAddedId] = useState(null);
+  const { addItem } = useCart();
 
   useEffect(() => {
     const cat = p.category === 'all' ? undefined : p.category;
@@ -165,7 +172,8 @@ function ProductGridBlock({ p, brand }) {
 
   const handleAdd = (product) => {
     addItem({ id: product.id, name: product.name, price: product.price, image: product.image });
-    openCart();
+    setAddedId(product.id);
+    setTimeout(() => setAddedId(null), 1500);
   };
 
   if (loading) {
@@ -177,7 +185,7 @@ function ProductGridBlock({ p, brand }) {
   }
 
   return (
-    <section style={{ padding: '80px 40px', maxWidth: 1200, margin: '0 auto' }}>
+    <section data-products style={{ padding: '80px 40px', maxWidth: 1200, margin: '0 auto' }}>
       {p.title && (
         <h2 style={{
           fontFamily: 'var(--font-display)',
@@ -200,7 +208,7 @@ function ProductGridBlock({ p, brand }) {
           gap: 24,
         }}>
           {products.map(product => (
-            <ProductCard key={product.id} product={product} brand={brand} onAdd={() => handleAdd(product)} />
+            <ProductCard key={product.id} product={product} brand={brand} onAdd={() => handleAdd(product)} justAdded={addedId === product.id} />
           ))}
         </div>
       )}
@@ -208,7 +216,7 @@ function ProductGridBlock({ p, brand }) {
   );
 }
 
-function ProductCard({ product, brand, onAdd }) {
+function ProductCard({ product, brand, onAdd, justAdded }) {
   const [hovered, setHovered] = useState(false);
 
   return (
@@ -217,90 +225,292 @@ function ProductCard({ product, brand, onAdd }) {
         background: 'var(--kiosk-card)',
         borderRadius: 'var(--radius-lg)',
         overflow: 'hidden',
-        cursor: 'pointer',
         transition: 'transform 0.35s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.35s ease',
         transform: hovered ? 'translateY(-6px)' : 'translateY(0)',
         boxShadow: hovered ? `0 20px 40px rgba(0,0,0,0.3), 0 0 40px ${brand}15` : '0 2px 8px rgba(0,0,0,0.1)',
       }}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
-      onClick={onAdd}
     >
-      <div style={{
-        aspectRatio: '3/4',
-        background: 'var(--kiosk-elevated)',
-        position: 'relative',
-        overflow: 'hidden',
-      }}>
-        {product.image ? (
-          <img
-            src={product.image}
-            alt={product.name}
-            style={{
+      <Link to={`/product/${product.id}`} style={{ textDecoration: 'none' }}>
+        <div style={{
+          aspectRatio: '3/4',
+          background: 'var(--kiosk-elevated)',
+          position: 'relative',
+          overflow: 'hidden',
+          cursor: 'pointer',
+        }}>
+          {product.image ? (
+            <img
+              src={product.image}
+              alt={product.name}
+              style={{
+                width: '100%',
+                height: '100%',
+                objectFit: 'cover',
+                transition: 'transform 0.5s ease',
+                transform: hovered ? 'scale(1.05)' : 'scale(1)',
+              }}
+            />
+          ) : (
+            <div style={{
               width: '100%',
               height: '100%',
-              objectFit: 'cover',
-              transition: 'transform 0.5s ease',
-              transform: hovered ? 'scale(1.05)' : 'scale(1)',
-            }}
-          />
-        ) : (
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              color: 'var(--kiosk-text-secondary)',
+              fontFamily: 'var(--font-display)',
+              fontSize: '3rem',
+            }}>
+              ◇
+            </div>
+          )}
           <div style={{
-            width: '100%',
-            height: '100%',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            color: 'var(--kiosk-text-secondary)',
-            fontFamily: 'var(--font-display)',
-            fontSize: '3rem',
-          }}>
-            ◇
-          </div>
-        )}
-        <div style={{
-          position: 'absolute',
-          bottom: 0,
-          left: 0,
-          right: 0,
-          height: '40%',
-          background: 'linear-gradient(transparent, rgba(0,0,0,0.6))',
-          pointerEvents: 'none',
-        }} />
-      </div>
-      <div style={{ padding: '16px 20px 20px' }}>
-        <h3 style={{
-          fontFamily: 'var(--font-display)',
-          fontSize: '1.05rem',
-          fontWeight: 500,
-          color: 'var(--kiosk-text)',
-          marginBottom: 6,
-        }}>
-          {product.name}
-        </h3>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <span style={{
-            fontFamily: 'var(--font-display)',
-            fontSize: '1.15rem',
-            fontWeight: 600,
-            color: brand,
-          }}>
-            ${product.price.toFixed(2)}
-          </span>
-          <span style={{
-            fontSize: '0.7rem',
-            fontWeight: 500,
-            color: 'var(--kiosk-text-secondary)',
-            textTransform: 'uppercase',
-            letterSpacing: '0.08em',
-          }}>
-            {product.category}
-          </span>
+            position: 'absolute',
+            bottom: 0,
+            left: 0,
+            right: 0,
+            height: '40%',
+            background: 'linear-gradient(transparent, rgba(0,0,0,0.6))',
+            pointerEvents: 'none',
+          }} />
         </div>
+        <div style={{ padding: '16px 20px 0' }}>
+          <h3 style={{
+            fontFamily: 'var(--font-display)',
+            fontSize: '1.05rem',
+            fontWeight: 500,
+            color: 'var(--kiosk-text)',
+            marginBottom: 6,
+          }}>
+            {product.name}
+          </h3>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span style={{
+              fontFamily: 'var(--font-display)',
+              fontSize: '1.15rem',
+              fontWeight: 600,
+              color: brand,
+            }}>
+              ${product.price.toFixed(2)}
+            </span>
+            <span style={{
+              fontSize: '0.7rem',
+              fontWeight: 500,
+              color: 'var(--kiosk-text-secondary)',
+              textTransform: 'uppercase',
+              letterSpacing: '0.08em',
+            }}>
+              {product.category}
+            </span>
+          </div>
+        </div>
+      </Link>
+      <div style={{ padding: '14px 20px 20px' }}>
+        <button
+          onClick={(e) => { e.preventDefault(); onAdd(); }}
+          style={{
+            width: '100%',
+            padding: '12px 16px',
+            background: justAdded ? '#4caf50' : brand,
+            color: '#fff',
+            fontSize: '0.8rem',
+            fontWeight: 600,
+            letterSpacing: '0.05em',
+            textTransform: 'uppercase',
+            borderRadius: 'var(--radius-md)',
+            border: 'none',
+            cursor: 'pointer',
+            transition: 'background 0.2s, transform 0.1s',
+            minHeight: 44,
+          }}
+        >
+          {justAdded ? '✓ Added to Cart' : 'Add to Cart'}
+        </button>
       </div>
     </div>
   );
 }
+
+// ─── Category Shop Block ───────────────────────────────────────────────────
+
+function CategoryShopBlock({ p, brand }) {
+  const [products, setProducts] = useState([]);
+  const [categories, setCategories] = useState([]);
+  const [activeCategory, setActiveCategory] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [addedId, setAddedId] = useState(null);
+  const { addItem } = useCart();
+  const sectionRefs = useRef({});
+  const isScrolling = useRef(false);
+
+  useEffect(() => {
+    Promise.all([api.getProducts(), api.getCategories()])
+      .then(([prods, cats]) => {
+        setProducts(prods);
+        setCategories(cats);
+        if (cats.length > 0) setActiveCategory(cats[0]);
+      })
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, []);
+
+  useEffect(() => {
+    const handleScroll = () => {
+      if (isScrolling.current) return;
+      const scrollPos = window.scrollY + 150;
+      const atBottom = window.innerHeight + window.scrollY >= document.body.scrollHeight - 50;
+      if (atBottom && categories.length > 0) {
+        setActiveCategory(categories[categories.length - 1]);
+        return;
+      }
+      for (const cat of categories) {
+        const el = sectionRefs.current[cat];
+        if (el) {
+          const top = el.offsetTop;
+          const bottom = top + el.offsetHeight;
+          if (scrollPos >= top && scrollPos < bottom) {
+            setActiveCategory(cat);
+            break;
+          }
+        }
+      }
+    };
+    window.addEventListener('scroll', handleScroll);
+    return () => window.removeEventListener('scroll', handleScroll);
+  }, [categories]);
+
+  const scrollToCategory = (cat) => {
+    setActiveCategory(cat);
+    isScrolling.current = true;
+    const el = sectionRefs.current[cat];
+    if (el) {
+      const top = el.offsetTop - 100;
+      window.scrollTo({ top, behavior: 'smooth' });
+    }
+    setTimeout(() => { isScrolling.current = false; }, 800);
+  };
+
+  const handleAdd = (product) => {
+    addItem({ id: product.id, name: product.name, price: product.price, image: product.image });
+    setAddedId(product.id);
+    setTimeout(() => setAddedId(null), 1500);
+  };
+
+  const productsByCategory = categories.reduce((acc, cat) => {
+    acc[cat] = products.filter(prod => prod.category === cat);
+    return acc;
+  }, {});
+
+  if (loading) {
+    return (
+      <div style={{ display: 'flex', justifyContent: 'center', padding: 80 }}>
+        <div style={{ width: 40, height: 40, border: '3px solid var(--kiosk-elevated)', borderTopColor: brand, borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
+      </div>
+    );
+  }
+
+  const showSidebar = p.show_sidebar !== false;
+
+  return (
+    <div style={{ display: 'flex', minHeight: 400 }}>
+      {showSidebar && (
+        <aside style={categoryShopStyles.sidebar}>
+          <div style={categoryShopStyles.sidebarInner}>
+            <h3 style={categoryShopStyles.sidebarTitle}>Categories</h3>
+            <nav style={categoryShopStyles.sidebarNav}>
+              {categories.map(cat => (
+                <button
+                  key={cat}
+                  onClick={() => scrollToCategory(cat)}
+                  style={{
+                    ...categoryShopStyles.sidebarLink,
+                    ...(activeCategory === cat ? { ...categoryShopStyles.sidebarLinkActive, borderLeftColor: brand, color: brand } : {}),
+                  }}
+                >
+                  {cat}
+                </button>
+              ))}
+            </nav>
+          </div>
+        </aside>
+      )}
+      <main style={{ flex: 1, padding: showSidebar ? '40px 48px 80px' : '40px 40px 80px', maxWidth: showSidebar ? 'none' : 1200, margin: showSidebar ? 0 : '0 auto' }}>
+        {p.title && (
+          <h2 style={{ fontFamily: 'var(--font-display)', fontSize: '2rem', fontWeight: 500, color: 'var(--kiosk-text)', textAlign: showSidebar ? 'left' : 'center', marginBottom: 40 }}>
+            {p.title}
+          </h2>
+        )}
+        {categories.length === 0 ? (
+          <p style={{ textAlign: 'center', color: 'var(--kiosk-text-secondary)', padding: 40 }}>No products available yet.</p>
+        ) : (
+          categories.map(cat => (
+            <section key={cat} ref={el => sectionRefs.current[cat] = el} style={{ marginBottom: 64 }}>
+              <h3 style={{ fontFamily: 'var(--font-display)', fontSize: '1.5rem', fontWeight: 500, color: brand, marginBottom: 28, paddingBottom: 14, borderBottom: '1px solid var(--kiosk-border)' }}>
+                {cat}
+              </h3>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 20 }}>
+                {productsByCategory[cat]?.map(product => (
+                  <ShopProductCard key={product.id} product={product} brand={brand} onAdd={() => handleAdd(product)} justAdded={addedId === product.id} />
+                ))}
+              </div>
+            </section>
+          ))
+        )}
+      </main>
+    </div>
+  );
+}
+
+function ShopProductCard({ product, brand, onAdd, justAdded }) {
+  const [hovered, setHovered] = useState(false);
+  return (
+    <div
+      style={{
+        background: 'var(--kiosk-card)',
+        borderRadius: 'var(--radius-lg)',
+        overflow: 'hidden',
+        transition: 'transform 0.35s ease, box-shadow 0.35s ease',
+        transform: hovered ? 'translateY(-6px)' : 'translateY(0)',
+        boxShadow: hovered ? `0 20px 40px rgba(0,0,0,0.3), 0 0 40px ${brand}15` : '0 2px 8px rgba(0,0,0,0.1)',
+      }}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+    >
+      <Link to={`/product/${product.id}`} style={{ textDecoration: 'none' }}>
+        <div style={{ aspectRatio: '1/1', background: 'var(--kiosk-elevated)', overflow: 'hidden' }}>
+          {product.image ? (
+            <img src={product.image} alt={product.name} style={{ width: '100%', height: '100%', objectFit: 'cover', transition: 'transform 0.5s ease', transform: hovered ? 'scale(1.05)' : 'scale(1)' }} />
+          ) : (
+            <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--kiosk-text-secondary)', fontFamily: 'var(--font-display)', fontSize: '2.5rem' }}>◇</div>
+          )}
+        </div>
+        <div style={{ padding: '14px 16px 6px' }}>
+          <h4 style={{ fontFamily: 'var(--font-display)', fontSize: '0.95rem', fontWeight: 500, color: 'var(--kiosk-text)', marginBottom: 4 }}>{product.name}</h4>
+          <span style={{ fontFamily: 'var(--font-display)', fontSize: '1rem', fontWeight: 600, color: brand }}>${product.price.toFixed(2)}</span>
+        </div>
+      </Link>
+      <div style={{ padding: '8px 16px 16px' }}>
+        <button
+          onClick={e => { e.preventDefault(); onAdd(); }}
+          style={{ width: '100%', padding: '10px 14px', background: justAdded ? '#4caf50' : brand, color: '#fff', fontSize: '0.75rem', fontWeight: 600, letterSpacing: '0.05em', textTransform: 'uppercase', borderRadius: 'var(--radius-md)', border: 'none', cursor: 'pointer', minHeight: 40 }}
+        >
+          {justAdded ? '✓ Added' : 'Add to Cart'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+const categoryShopStyles = {
+  sidebar: { width: 200, flexShrink: 0, background: 'var(--kiosk-surface)', borderRight: '1px solid var(--kiosk-border)', position: 'sticky', top: 72, height: 'calc(100vh - 72px)', overflowY: 'auto' },
+  sidebarInner: { padding: '32px 0' },
+  sidebarTitle: { fontFamily: 'var(--font-display)', fontSize: '0.8rem', fontWeight: 600, color: 'var(--kiosk-text-secondary)', textTransform: 'uppercase', letterSpacing: '0.1em', padding: '0 20px', marginBottom: 16 },
+  sidebarNav: { display: 'flex', flexDirection: 'column' },
+  sidebarLink: { display: 'block', padding: '12px 20px', fontSize: '0.9rem', fontWeight: 500, color: 'var(--kiosk-text-secondary)', textAlign: 'left', background: 'transparent', border: 'none', borderLeft: '3px solid transparent', cursor: 'pointer', transition: 'all 0.2s' },
+  sidebarLinkActive: { background: 'var(--kiosk-elevated)', fontWeight: 600 },
+};
 
 // ─── Text Block ────────────────────────────────────────────────────────────
 

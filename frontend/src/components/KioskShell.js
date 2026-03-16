@@ -3,6 +3,7 @@ import { useParams, Routes, Route } from 'react-router-dom';
 import Navbar from './Navbar';
 import CartDrawer from './CartDrawer';
 import PageRenderer from './PageRenderer';
+import ProductDetail from './ProductDetail';
 import * as api from '../api';
 
 export default function KioskShell() {
@@ -20,11 +21,16 @@ export default function KioskShell() {
     return () => { cancelled = true; };
   }, []);
 
+  const bgStyle = settings.bg_image
+    ? { minHeight: '100vh', background: `url(${settings.bg_image}) center/cover fixed` }
+    : { minHeight: '100vh', background: settings.bg_color || 'var(--kiosk-bg)' };
+
   return (
-    <div style={{ minHeight: '100vh', background: 'var(--kiosk-bg)' }}>
+    <div style={bgStyle}>
       <Navbar settings={settings} pages={pages} />
       <Routes>
         <Route path="/" element={<PageView slug="home" settings={settings} />} />
+        <Route path="/product/:id" element={<ProductDetail settings={settings} />} />
         <Route path="/:slug" element={<PageViewFromParams settings={settings} />} />
       </Routes>
       <CartDrawer settings={settings} />
