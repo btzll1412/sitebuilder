@@ -5,8 +5,10 @@ import * as api from '../api';
 const BLOCK_TYPES = [
   { type: 'hero', label: 'Hero Banner', icon: '▮', desc: 'Full-width banner with title, subtitle, CTA' },
   { type: 'product_grid', label: 'Product Grid', icon: '▦', desc: 'Grid of product cards from your store' },
+  { type: 'featured_products', label: 'Featured Products', icon: '★', desc: 'Hand-pick specific products to display' },
   { type: 'category_shop', label: 'Category Shop', icon: '◫', desc: 'Full shop with category sidebar navigation' },
   { type: 'text', label: 'Text Block', icon: '¶', desc: 'Heading and body copy' },
+  { type: 'buttons', label: 'Buttons', icon: '▢', desc: 'One or more CTA buttons you can place anywhere' },
   { type: 'banner', label: 'Promo Banner', icon: '▬', desc: 'Single-line promotional strip' },
   { type: 'image', label: 'Image', icon: '◻', desc: 'Full-width or contained image' },
   { type: 'spacer', label: 'Spacer', icon: '↕', desc: 'Vertical whitespace' },
@@ -22,10 +24,12 @@ function uid() {
 
 function defaultProps(type) {
   switch (type) {
-    case 'hero': return { title: 'Your Heading', subtitle: 'A compelling subtitle goes here.', cta: 'Shop Now', badge: '', bg_color: '#0d0d0d', bg_image: '' };
+    case 'hero': return { title: 'Your Heading', subtitle: 'A compelling subtitle goes here.', cta: 'Shop Now', cta_link: '/shop', cta2: '', cta2_link: '', badge: '', bg_color: '#0d0d0d', bg_image: '' };
     case 'product_grid': return { title: 'Products', category: 'all', limit: 6, columns: 3 };
+    case 'featured_products': return { title: 'Featured', product_ids: [], columns: 3 };
     case 'category_shop': return { title: 'Shop Our Collection', show_sidebar: true };
     case 'text': return { title: 'Section Title', body: 'Your content here...', align: 'left' };
+    case 'buttons': return { buttons: [{ text: 'Shop Now', link: '/shop', style: 'primary' }], align: 'center', bg_color: '' };
     case 'banner': return { text: 'Free shipping on orders over $50', bg_color: '#C2185B', text_color: '#ffffff' };
     case 'image': return { src: '', alt: '', caption: '', width: 'contained' };
     case 'spacer': return { height: 60 };
@@ -415,6 +419,123 @@ export default function PageBuilder() {
   );
 }
 
+// ─── Product Picker ───────────────────────────────────────────────────────
+
+function ProductPicker({ selectedIds, onChange }) {
+  const [products, setProducts] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [filter, setFilter] = useState('');
+
+  useEffect(() => {
+    api.getAllProducts()
+      .then(setProducts)
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, []);
+
+  const toggleProduct = (id) => {
+    if (selectedIds.includes(id)) {
+      onChange(selectedIds.filter(pid => pid !== id));
+    } else {
+      onChange([...selectedIds, id]);
+    }
+  };
+
+  const moveUp = (id) => {
+    const idx = selectedIds.indexOf(id);
+    if (idx > 0) {
+      const newIds = [...selectedIds];
+      [newIds[idx - 1], newIds[idx]] = [newIds[idx], newIds[idx - 1]];
+      onChange(newIds);
+    }
+  };
+
+  const moveDown = (id) => {
+    const idx = selectedIds.indexOf(id);
+    if (idx < selectedIds.length - 1) {
+      const newIds = [...selectedIds];
+      [newIds[idx], newIds[idx + 1]] = [newIds[idx + 1], newIds[idx]];
+      onChange(newIds);
+    }
+  };
+
+  const filteredProducts = products.filter(p =>
+    p.name.toLowerCase().includes(filter.toLowerCase()) ||
+    p.category.toLowerCase().includes(filter.toLowerCase())
+  );
+
+  const selectedProducts = selectedIds.map(id => products.find(p => p.id === id)).filter(Boolean);
+
+  if (loading) {
+    return <div style={{ padding: 16, color: 'var(--admin-text-hint)', fontSize: '0.85rem' }}>Loading products...</div>;
+  }
+
+  return (
+    <div style={s.editorField}>
+      <label style={s.editorLabel}>Selected Products ({selectedIds.length})</label>
+
+      {/* Selected products with reorder */}
+      {selectedProducts.length > 0 && (
+        <div style={{ marginBottom: 12, display: 'flex', flexDirection: 'column', gap: 6 }}>
+          {selectedProducts.map((p, idx) => (
+            <div key={p.id} style={{
+              display: 'flex', alignItems: 'center', gap: 8,
+              padding: '8px 12px', background: 'var(--brand-light)',
+              borderRadius: 'var(--radius-sm)', border: '1px solid var(--brand)',
+            }}>
+              {p.image && <img src={p.image} alt="" style={{ width: 32, height: 32, objectFit: 'cover', borderRadius: 4 }} />}
+              <span style={{ flex: 1, fontSize: '0.85rem', fontWeight: 500, color: 'var(--admin-text)' }}>{p.name}</span>
+              <span style={{ fontSize: '0.75rem', color: 'var(--admin-text-hint)' }}>${p.price}</span>
+              <button onClick={() => moveUp(p.id)} disabled={idx === 0} style={{ ...s.blockBtn, opacity: idx === 0 ? 0.3 : 1 }}>↑</button>
+              <button onClick={() => moveDown(p.id)} disabled={idx === selectedProducts.length - 1} style={{ ...s.blockBtn, opacity: idx === selectedProducts.length - 1 ? 0.3 : 1 }}>↓</button>
+              <button onClick={() => toggleProduct(p.id)} style={{ ...s.blockBtn, color: '#e57373' }}>✕</button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Search/filter */}
+      <input
+        type="text"
+        placeholder="Search products to add..."
+        value={filter}
+        onChange={e => setFilter(e.target.value)}
+        style={{ ...s.editorInput, marginBottom: 8 }}
+      />
+
+      {/* Available products */}
+      <div style={{ maxHeight: 200, overflowY: 'auto', border: '1px solid var(--admin-border)', borderRadius: 'var(--radius-sm)' }}>
+        {filteredProducts.filter(p => !selectedIds.includes(p.id)).map(p => (
+          <div
+            key={p.id}
+            onClick={() => toggleProduct(p.id)}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 10,
+              padding: '10px 12px', cursor: 'pointer',
+              borderBottom: '1px solid var(--admin-border)',
+              transition: 'background 0.15s',
+            }}
+            onMouseEnter={e => e.currentTarget.style.background = 'var(--admin-surface)'}
+            onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+          >
+            {p.image && <img src={p.image} alt="" style={{ width: 36, height: 36, objectFit: 'cover', borderRadius: 4 }} />}
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: '0.85rem', fontWeight: 500, color: 'var(--admin-text)' }}>{p.name}</div>
+              <div style={{ fontSize: '0.75rem', color: 'var(--admin-text-hint)' }}>{p.category} · ${p.price}</div>
+            </div>
+            <span style={{ fontSize: '0.8rem', color: 'var(--brand)' }}>+ Add</span>
+          </div>
+        ))}
+        {filteredProducts.filter(p => !selectedIds.includes(p.id)).length === 0 && (
+          <div style={{ padding: 16, textAlign: 'center', color: 'var(--admin-text-hint)', fontSize: '0.85rem' }}>
+            {filter ? 'No matching products' : 'All products selected'}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ─── Block Editor ─────────────────────────────────────────────────────────
 
 function BlockEditor({ block, onUpdate }) {
@@ -477,10 +598,21 @@ function BlockEditor({ block, onUpdate }) {
       return (<>
         {field('Title', 'title')}
         {field('Subtitle', 'subtitle', 'textarea')}
-        {field('CTA Button Text', 'cta')}
         {field('Badge Text', 'badge')}
-        {field('Background Color', 'bg_color', 'color')}
-        {field('Background Image URL', 'bg_image')}
+        <div style={{ borderTop: '1px solid var(--admin-border)', paddingTop: 14, marginTop: 8 }}>
+          <div style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--admin-text)', marginBottom: 12 }}>Primary Button</div>
+          {field('Button Text', 'cta')}
+          {field('Button Link', 'cta_link')}
+        </div>
+        <div style={{ borderTop: '1px solid var(--admin-border)', paddingTop: 14, marginTop: 8 }}>
+          <div style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--admin-text)', marginBottom: 12 }}>Secondary Button (optional)</div>
+          {field('Button Text', 'cta2')}
+          {field('Button Link', 'cta2_link')}
+        </div>
+        <div style={{ borderTop: '1px solid var(--admin-border)', paddingTop: 14, marginTop: 8 }}>
+          {field('Background Color', 'bg_color', 'color')}
+          {field('Background Image URL', 'bg_image')}
+        </div>
       </>);
     case 'product_grid':
       return (<>
@@ -497,6 +629,19 @@ function BlockEditor({ block, onUpdate }) {
           { value: 3, label: '3 Columns' },
           { value: 4, label: '4 Columns' },
         ])}
+      </>);
+    case 'featured_products':
+      return (<>
+        {field('Title', 'title')}
+        {field('Columns', 'columns', 'select', [
+          { value: 2, label: '2 Columns' },
+          { value: 3, label: '3 Columns' },
+          { value: 4, label: '4 Columns' },
+        ])}
+        <ProductPicker
+          selectedIds={props.product_ids || []}
+          onChange={(ids) => onUpdate({ product_ids: ids })}
+        />
       </>);
     case 'category_shop':
       return (<>
@@ -526,6 +671,68 @@ function BlockEditor({ block, onUpdate }) {
           { value: 'center', label: 'Center' },
           { value: 'right', label: 'Right' },
         ])}
+      </>);
+    case 'buttons':
+      return (<>
+        {field('Alignment', 'align', 'select', [
+          { value: 'left', label: 'Left' },
+          { value: 'center', label: 'Center' },
+          { value: 'right', label: 'Right' },
+        ])}
+        {field('Background Color', 'bg_color', 'color')}
+        <div style={s.editorField}>
+          <label style={s.editorLabel}>Buttons</label>
+          {(props.buttons || []).map((btn, idx) => (
+            <div key={idx} style={{ display: 'flex', gap: 8, marginBottom: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+              <input
+                value={btn.text}
+                onChange={e => {
+                  const btns = [...(props.buttons || [])];
+                  btns[idx] = { ...btns[idx], text: e.target.value };
+                  onUpdate({ buttons: btns });
+                }}
+                placeholder="Button text"
+                style={{ ...s.editorInput, flex: 1, minWidth: 100 }}
+              />
+              <input
+                value={btn.link || ''}
+                onChange={e => {
+                  const btns = [...(props.buttons || [])];
+                  btns[idx] = { ...btns[idx], link: e.target.value };
+                  onUpdate({ buttons: btns });
+                }}
+                placeholder="Link (e.g. /shop)"
+                style={{ ...s.editorInput, flex: 1, minWidth: 100 }}
+              />
+              <select
+                value={btn.style || 'primary'}
+                onChange={e => {
+                  const btns = [...(props.buttons || [])];
+                  btns[idx] = { ...btns[idx], style: e.target.value };
+                  onUpdate({ buttons: btns });
+                }}
+                style={{ ...s.editorInput, width: 100 }}
+              >
+                <option value="primary">Primary</option>
+                <option value="secondary">Secondary</option>
+                <option value="outline">Outline</option>
+              </select>
+              <button
+                onClick={() => {
+                  const btns = (props.buttons || []).filter((_, i) => i !== idx);
+                  onUpdate({ buttons: btns });
+                }}
+                style={{ ...s.blockBtn, color: '#e57373' }}
+              >✕</button>
+            </div>
+          ))}
+          <button
+            onClick={() => onUpdate({ buttons: [...(props.buttons || []), { text: 'Button', link: '/', style: 'primary' }] })}
+            style={{ ...s.textBtn, fontSize: '0.8rem', color: 'var(--brand)' }}
+          >
+            + Add Button
+          </button>
+        </div>
       </>);
     case 'banner':
       return (<>
@@ -688,6 +895,25 @@ function BlockPreview({ block }) {
           </div>
         </div>
       );
+    case 'featured_products':
+      const count = (p.product_ids || []).length || 3;
+      return (
+        <div style={{ padding: '60px 40px', background: '#0d0d0d' }}>
+          <h2 style={{ fontFamily: 'var(--font-display)', fontSize: '1.75rem', color: '#f5f0eb', textAlign: 'center', marginBottom: 32 }}>{p.title || 'Featured'}</h2>
+          <div style={{ display: 'grid', gridTemplateColumns: `repeat(${p.columns || 3}, 1fr)`, gap: 20 }}>
+            {Array.from({ length: Math.min(count, 6) }).map((_, i) => (
+              <div key={i} style={{ background: '#1c1c1c', borderRadius: 12, aspectRatio: '3/4', display: 'flex', alignItems: 'flex-end', position: 'relative' }}>
+                <div style={{ position: 'absolute', top: 8, left: 8, background: '#C2185B', color: '#fff', fontSize: '0.65rem', fontWeight: 600, padding: '3px 8px', borderRadius: 4 }}>★ FEATURED</div>
+                <div style={{ padding: 16, width: '100%' }}>
+                  <div style={{ height: 10, background: '#252525', borderRadius: 4, marginBottom: 8, width: '70%' }} />
+                  <div style={{ height: 8, background: '#252525', borderRadius: 4, width: '40%' }} />
+                </div>
+              </div>
+            ))}
+          </div>
+          {count === 0 && <p style={{ textAlign: 'center', color: '#a89f96', fontSize: '0.9rem' }}>No products selected yet</p>}
+        </div>
+      );
     case 'category_shop':
       return (
         <div style={{ display: 'flex', background: '#0d0d0d', minHeight: 300 }}>
@@ -719,6 +945,25 @@ function BlockPreview({ block }) {
         <div style={{ padding: '48px 40px', background: '#0d0d0d', textAlign: p.align || 'left' }}>
           <h2 style={{ fontFamily: 'var(--font-display)', fontSize: '1.5rem', color: '#f5f0eb', marginBottom: 12 }}>{p.title}</h2>
           <p style={{ color: '#a89f96', maxWidth: 700, lineHeight: 1.7, margin: p.align === 'center' ? '0 auto' : 0 }}>{p.body}</p>
+        </div>
+      );
+    case 'buttons':
+      return (
+        <div style={{ padding: '32px 40px', background: p.bg_color || '#0d0d0d', display: 'flex', justifyContent: p.align === 'left' ? 'flex-start' : p.align === 'right' ? 'flex-end' : 'center', gap: 12, flexWrap: 'wrap' }}>
+          {(p.buttons || []).map((btn, i) => (
+            <span key={i} style={{
+              padding: '14px 32px',
+              background: btn.style === 'primary' ? '#C2185B' : btn.style === 'outline' ? 'transparent' : '#252525',
+              color: '#fff',
+              border: btn.style === 'outline' ? '2px solid rgba(255,255,255,0.3)' : 'none',
+              borderRadius: 8,
+              fontWeight: 600,
+              fontSize: '0.88rem',
+              letterSpacing: '0.04em',
+            }}>
+              {btn.text}
+            </span>
+          ))}
         </div>
       );
     case 'banner':
