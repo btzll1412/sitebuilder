@@ -1,0 +1,16 @@
+version: "3.8"
+
+services:
+  sitebuilder:
+    build: .
+    container_name: sitebuilder
+    ports:
+      - "80:80"
+    volumes:
+      - sitebuilder-data:/opt/kiosk/data
+      - sitebuilder-uploads:/opt/kiosk/uploads
+    restart: unless-stopped
+
+volumes:
+  sitebuilder-data:
+  sitebuilder-uploads:
