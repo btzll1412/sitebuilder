@@ -87,6 +87,7 @@ def init_db():
             category TEXT DEFAULT 'General',
             in_stock INTEGER DEFAULT 1,
             sort_order INTEGER DEFAULT 0,
+            variants TEXT DEFAULT '[]',
             created_at TEXT DEFAULT (datetime('now'))
         );
 
@@ -379,7 +380,12 @@ async def get_products(category: Optional[str] = None):
                 rows = conn.execute(
                     "SELECT * FROM products WHERE in_stock = 1 ORDER BY sort_order"
                 ).fetchall()
-            return [dict(r) for r in rows]
+            results = []
+            for r in rows:
+                d = dict(r)
+                d["variants"] = json.loads(d.get("variants") or "[]")
+                results.append(d)
+            return results
         finally:
             conn.close()
     except Exception:
@@ -394,7 +400,12 @@ async def get_all_products(admin_id: int = Depends(verify_token)):
             rows = conn.execute(
                 "SELECT * FROM products ORDER BY sort_order"
             ).fetchall()
-            return [dict(r) for r in rows]
+            results = []
+            for r in rows:
+                d = dict(r)
+                d["variants"] = json.loads(d.get("variants") or "[]")
+                results.append(d)
+            return results
         finally:
             conn.close()
     except Exception:
@@ -426,7 +437,9 @@ async def get_product(product_id: int):
             ).fetchone()
             if not row:
                 raise HTTPException(status_code=404, detail="Product not found")
-            return dict(row)
+            result = dict(row)
+            result["variants"] = json.loads(result.get("variants") or "[]")
+            return result
         finally:
             conn.close()
     except HTTPException:
@@ -443,6 +456,7 @@ async def create_product(
     category: str = Form("General"),
     in_stock: int = Form(1),
     sort_order: int = Form(0),
+    variants: str = Form("[]"),
     image: Optional[UploadFile] = File(None),
     admin_id: int = Depends(verify_token),
 ):
@@ -459,14 +473,16 @@ async def create_product(
         conn = get_db()
         try:
             cur = conn.execute(
-                "INSERT INTO products (name, description, price, image, category, in_stock, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                (name.strip(), description, price, image_path, category, in_stock, sort_order),
+                "INSERT INTO products (name, description, price, image, category, in_stock, sort_order, variants) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (name.strip(), description, price, image_path, category, in_stock, sort_order, variants),
             )
             conn.commit()
             product = conn.execute(
                 "SELECT * FROM products WHERE id = ?", (cur.lastrowid,)
             ).fetchone()
-            return dict(product)
+            result = dict(product)
+            result["variants"] = json.loads(result.get("variants") or "[]")
+            return result
         finally:
             conn.close()
     except HTTPException:
@@ -484,6 +500,7 @@ async def update_product(
     category: str = Form("General"),
     in_stock: int = Form(1),
     sort_order: int = Form(0),
+    variants: str = Form("[]"),
     image: Optional[UploadFile] = File(None),
     admin_id: int = Depends(verify_token),
 ):
@@ -506,14 +523,16 @@ async def update_product(
                 image_path = await _save_upload(image)
 
             conn.execute(
-                "UPDATE products SET name=?, description=?, price=?, image=?, category=?, in_stock=?, sort_order=? WHERE id=?",
-                (name.strip(), description, price, image_path, category, in_stock, sort_order, product_id),
+                "UPDATE products SET name=?, description=?, price=?, image=?, category=?, in_stock=?, sort_order=?, variants=? WHERE id=?",
+                (name.strip(), description, price, image_path, category, in_stock, sort_order, variants, product_id),
             )
             conn.commit()
             product = conn.execute(
                 "SELECT * FROM products WHERE id = ?", (product_id,)
             ).fetchone()
-            return dict(product)
+            result = dict(product)
+            result["variants"] = json.loads(result.get("variants") or "[]")
+            return result
         finally:
             conn.close()
     except HTTPException:

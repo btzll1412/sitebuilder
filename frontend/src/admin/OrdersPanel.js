@@ -116,7 +116,12 @@ export default function OrdersPanel() {
                   <div style={s.itemsTable}>
                     {(order.items || []).map((item, i) => (
                       <div key={i} style={s.itemRow}>
-                        <span style={s.itemName}>{item.name}</span>
+                        <div style={{ flex: 1 }}>
+                          <span style={s.itemName}>{item.name}</span>
+                          {item.variant && (
+                            <span style={s.itemVariant}> — {item.variant}</span>
+                          )}
+                        </div>
                         <span style={s.itemQty}>×{item.qty}</span>
                         <span style={s.itemPrice}>${(item.price * item.qty).toFixed(2)}</span>
                       </div>
@@ -179,7 +184,8 @@ const s = {
   orderDetails: { borderTop: '1px solid var(--admin-border)', padding: '20px 24px' },
   itemsTable: { display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 16 },
   itemRow: { display: 'flex', alignItems: 'center', gap: 12 },
-  itemName: { flex: 1, fontSize: '0.88rem', color: 'var(--admin-text)' },
+  itemName: { fontSize: '0.88rem', color: 'var(--admin-text)' },
+  itemVariant: { fontSize: '0.82rem', color: 'var(--brand)', fontWeight: 500 },
   itemQty: { fontSize: '0.82rem', color: 'var(--admin-text-hint)', width: 40 },
   itemPrice: { fontSize: '0.88rem', fontWeight: 500, color: 'var(--admin-text)', width: 70, textAlign: 'right' },
 

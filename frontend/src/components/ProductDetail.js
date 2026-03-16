@@ -10,6 +10,8 @@ export default function ProductDetail({ settings }) {
   const [error, setError] = useState(null);
   const [added, setAdded] = useState(false);
   const [quantity, setQuantity] = useState(1);
+  const [selectedVariant, setSelectedVariant] = useState(null);
+  const [displayImage, setDisplayImage] = useState('');
   const { addItem, openCart } = useCart();
 
   const brand = settings?.primary_color || '#C2185B';
@@ -18,22 +20,52 @@ export default function ProductDetail({ settings }) {
     setLoading(true);
     setError(null);
     api.getProduct(id)
-      .then(setProduct)
+      .then(data => {
+        setProduct(data);
+        setDisplayImage(data.image || '');
+        // Set default variant if product has variants (pick first in-stock one)
+        if (data.variants && data.variants.length > 0) {
+          const firstInStock = data.variants.find(v => v.in_stock !== false) || data.variants[0];
+          setSelectedVariant(firstInStock);
+          if (firstInStock.image) setDisplayImage(firstInStock.image);
+        }
+      })
       .catch(e => setError(e.message))
       .finally(() => setLoading(false));
   }, [id]);
 
+  const handleVariantSelect = (variant) => {
+    if (variant.in_stock === false) return; // Can't select out-of-stock
+    setSelectedVariant(variant);
+    // Update displayed image
+    setDisplayImage(variant.image || product.image || '');
+  };
+
   const handleAddToCart = () => {
+    const hasVariants = product.variants && product.variants.length > 0;
     for (let i = 0; i < quantity; i++) {
-      addItem({ id: product.id, name: product.name, price: product.price, image: product.image });
+      addItem({
+        id: product.id,
+        name: product.name,
+        price: product.price,
+        image: displayImage || product.image,
+        variant: hasVariants && selectedVariant ? selectedVariant.name : null,
+      });
     }
     setAdded(true);
     setTimeout(() => setAdded(false), 2000);
   };
 
   const handleBuyNow = () => {
+    const hasVariants = product.variants && product.variants.length > 0;
     for (let i = 0; i < quantity; i++) {
-      addItem({ id: product.id, name: product.name, price: product.price, image: product.image });
+      addItem({
+        id: product.id,
+        name: product.name,
+        price: product.price,
+        image: displayImage || product.image,
+        variant: hasVariants && selectedVariant ? selectedVariant.name : null,
+      });
     }
     openCart();
   };
@@ -72,8 +104,8 @@ export default function ProductDetail({ settings }) {
         {/* Image Section */}
         <div style={s.imageSection}>
           <div style={s.mainImage}>
-            {product.image ? (
-              <img src={product.image} alt={product.name} style={s.img} />
+            {displayImage ? (
+              <img src={displayImage} alt={product.name} style={s.img} />
             ) : (
               <div style={s.placeholder}>
                 <span style={s.placeholderIcon}>◇</span>
@@ -92,6 +124,42 @@ export default function ProductDetail({ settings }) {
             <div style={s.descriptionWrap}>
               <h3 style={s.descriptionTitle}>Description</h3>
               <p style={s.description}>{product.description}</p>
+            </div>
+          )}
+
+          {/* Variant/Color Selector */}
+          {product.variants && product.variants.length > 0 && (
+            <div style={s.variantWrap}>
+              <h3 style={s.variantTitle}>
+                Color: <span style={{ color: 'var(--kiosk-text)', fontWeight: 500 }}>{selectedVariant?.name || ''}</span>
+              </h3>
+              <div style={s.variantOptions}>
+                {product.variants.map((v, idx) => {
+                  const isSelected = selectedVariant?.name === v.name;
+                  const isOutOfStock = v.in_stock === false;
+                  return (
+                    <button
+                      key={idx}
+                      onClick={() => handleVariantSelect(v)}
+                      disabled={isOutOfStock}
+                      title={isOutOfStock ? `${v.name} - Out of Stock` : v.name}
+                      style={{
+                        ...s.variantSwatch,
+                        background: v.color_code || '#888',
+                        opacity: isOutOfStock ? 0.35 : 1,
+                        cursor: isOutOfStock ? 'not-allowed' : 'pointer',
+                        boxShadow: isSelected ? `0 0 0 3px ${brand}, 0 0 0 5px rgba(255,255,255,0.3)` : 'none',
+                        transform: isSelected ? 'scale(1.1)' : 'scale(1)',
+                      }}
+                    >
+                      {isOutOfStock && <span style={s.outOfStockLine} />}
+                    </button>
+                  );
+                })}
+              </div>
+              {selectedVariant?.in_stock === false && (
+                <p style={s.outOfStockText}>This color is currently out of stock</p>
+              )}
             </div>
           )}
 
@@ -289,6 +357,49 @@ const s = {
     color: 'var(--kiosk-text-secondary)',
     lineHeight: 1.7,
     fontSize: '0.95rem',
+  },
+  variantWrap: {
+    marginBottom: 28,
+  },
+  variantTitle: {
+    fontFamily: 'var(--font-body)',
+    fontSize: '0.8rem',
+    fontWeight: 600,
+    textTransform: 'uppercase',
+    letterSpacing: '0.08em',
+    color: 'var(--kiosk-text-secondary)',
+    marginBottom: 12,
+  },
+  variantOptions: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    gap: 12,
+  },
+  variantSwatch: {
+    width: 44,
+    height: 44,
+    borderRadius: '50%',
+    border: '3px solid var(--kiosk-border)',
+    cursor: 'pointer',
+    transition: 'all 0.2s',
+    position: 'relative',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  outOfStockLine: {
+    position: 'absolute',
+    width: '140%',
+    height: 2,
+    background: '#fff',
+    transform: 'rotate(-45deg)',
+    boxShadow: '0 0 2px rgba(0,0,0,0.5)',
+  },
+  outOfStockText: {
+    fontSize: '0.8rem',
+    color: '#ef5350',
+    marginTop: 10,
+    fontWeight: 500,
   },
   stockBadge: {
     marginBottom: 28,

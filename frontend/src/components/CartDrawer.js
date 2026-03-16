@@ -53,7 +53,7 @@ export default function CartDrawer({ settings }) {
     try {
       const expClean = cardExp.replace(/[\/\s]/g, '');
       const data = await api.checkout({
-        items: items.map(i => ({ id: i.id, name: i.name, price: i.price, qty: i.qty })),
+        items: items.map(i => ({ id: i.id, name: i.name, price: i.price, qty: i.qty, variant: i.variant || null })),
         card_number: cardNumber.replace(/\s/g, ''),
         card_exp: expClean,
         card_cvv: cardCvv,
@@ -124,7 +124,7 @@ export default function CartDrawer({ settings }) {
               ) : (
                 <div style={s.itemList}>
                   {items.map(item => (
-                    <div key={item.id} style={s.cartItem}>
+                    <div key={item.cartKey} style={s.cartItem}>
                       <div style={s.itemImage}>
                         {item.image ? (
                           <img src={item.image} alt={item.name} style={s.itemImg} />
@@ -134,23 +134,26 @@ export default function CartDrawer({ settings }) {
                       </div>
                       <div style={s.itemInfo}>
                         <div style={s.itemName}>{item.name}</div>
+                        {item.variant && (
+                          <div style={s.itemVariant}>{item.variant}</div>
+                        )}
                         <div style={s.itemPrice}>${item.price.toFixed(2)}</div>
                       </div>
                       <div style={s.qtyControls}>
                         <button
-                          onClick={() => updateQty(item.id, item.qty - 1)}
+                          onClick={() => updateQty(item.cartKey, item.qty - 1)}
                           style={s.qtyBtn}
                           aria-label="Decrease quantity"
                         >−</button>
                         <span style={s.qtyValue}>{item.qty}</span>
                         <button
-                          onClick={() => updateQty(item.id, item.qty + 1)}
+                          onClick={() => updateQty(item.cartKey, item.qty + 1)}
                           style={s.qtyBtn}
                           aria-label="Increase quantity"
                         >+</button>
                       </div>
                       <button
-                        onClick={() => removeItem(item.id)}
+                        onClick={() => removeItem(item.cartKey)}
                         style={s.removeBtn}
                         aria-label="Remove item"
                       >✕</button>
@@ -422,6 +425,7 @@ const s = {
   itemImgPlaceholder: { width: '100%', height: '100%', background: 'var(--kiosk-elevated)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--kiosk-text-secondary)', fontSize: '1.2rem' },
   itemInfo: { flex: 1, minWidth: 0 },
   itemName: { fontSize: '0.88rem', fontWeight: 500, color: 'var(--kiosk-text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' },
+  itemVariant: { fontSize: '0.75rem', color: 'var(--kiosk-text-secondary)', marginTop: 2, fontWeight: 500 },
   itemPrice: { fontSize: '0.8rem', color: 'var(--kiosk-text-secondary)', marginTop: 2 },
   qtyControls: { display: 'flex', alignItems: 'center', gap: 0, background: 'var(--kiosk-elevated)', borderRadius: 'var(--radius-sm)' },
   qtyBtn: { width: 32, height: 32, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--kiosk-text)', fontSize: '1rem', minWidth: 44, minHeight: 44, padding: '6px' },

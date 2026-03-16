@@ -7,39 +7,45 @@ const initialState = {
   isOpen: false,
 };
 
+// Generate a unique key for cart items (id + variant combination)
+function getCartKey(item) {
+  return item.variant ? `${item.id}_${item.variant}` : `${item.id}`;
+}
+
 function cartReducer(state, action) {
   switch (action.type) {
     case 'ADD_ITEM': {
-      const existing = state.items.find(i => i.id === action.payload.id);
+      const cartKey = getCartKey(action.payload);
+      const existing = state.items.find(i => getCartKey(i) === cartKey);
       if (existing) {
         return {
           ...state,
           items: state.items.map(i =>
-            i.id === action.payload.id ? { ...i, qty: i.qty + 1 } : i
+            getCartKey(i) === cartKey ? { ...i, qty: i.qty + 1 } : i
           ),
         };
       }
       return {
         ...state,
-        items: [...state.items, { ...action.payload, qty: 1 }],
+        items: [...state.items, { ...action.payload, cartKey, qty: 1 }],
       };
     }
     case 'REMOVE_ITEM':
       return {
         ...state,
-        items: state.items.filter(i => i.id !== action.payload),
+        items: state.items.filter(i => i.cartKey !== action.payload),
       };
     case 'UPDATE_QTY':
       if (action.payload.qty <= 0) {
         return {
           ...state,
-          items: state.items.filter(i => i.id !== action.payload.id),
+          items: state.items.filter(i => i.cartKey !== action.payload.cartKey),
         };
       }
       return {
         ...state,
         items: state.items.map(i =>
-          i.id === action.payload.id ? { ...i, qty: action.payload.qty } : i
+          i.cartKey === action.payload.cartKey ? { ...i, qty: action.payload.qty } : i
         ),
       };
     case 'CLEAR':
@@ -62,12 +68,12 @@ export function CartProvider({ children }) {
     dispatch({ type: 'ADD_ITEM', payload: product });
   }, []);
 
-  const removeItem = useCallback((id) => {
-    dispatch({ type: 'REMOVE_ITEM', payload: id });
+  const removeItem = useCallback((cartKey) => {
+    dispatch({ type: 'REMOVE_ITEM', payload: cartKey });
   }, []);
 
-  const updateQty = useCallback((id, qty) => {
-    dispatch({ type: 'UPDATE_QTY', payload: { id, qty } });
+  const updateQty = useCallback((cartKey, qty) => {
+    dispatch({ type: 'UPDATE_QTY', payload: { cartKey, qty } });
   }, []);
 
   const clearCart = useCallback(() => {
