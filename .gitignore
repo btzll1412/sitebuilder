@@ -1,0 +1,23 @@
+# Data
+data/
+uploads/
+
+# Environment
+.env
+venv/
+__pycache__/
+*.pyc
+
+# Node
+node_modules/
+build/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
