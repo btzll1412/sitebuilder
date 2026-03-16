@@ -8,6 +8,8 @@ const STEPS = ['cart', 'payment', 'confirmation'];
 export default function CartDrawer({ settings }) {
   const { items, isOpen, closeCart, itemCount, subtotal, updateQty, removeItem, clearCart } = useCart();
   const [step, setStep] = useState('cart');
+  const [paymentMethod, setPaymentMethod] = useState('card'); // card, cash, split
+  const [cashAmount, setCashAmount] = useState('');
   const [cardName, setCardName] = useState('');
   const [cardNumber, setCardNumber] = useState('');
   const [cardExp, setCardExp] = useState('');
@@ -15,6 +17,7 @@ export default function CartDrawer({ settings }) {
   const [processing, setProcessing] = useState(false);
   const [result, setResult] = useState(null);
   const [errors, setErrors] = useState({});
+  const [stockError, setStockError] = useState(null);
   const toast = useToast();
 
   const taxRate = parseFloat(settings?.tax_rate || '8.25');
@@ -22,16 +25,23 @@ export default function CartDrawer({ settings }) {
   const total = Math.round((subtotal + tax) * 100) / 100;
   const brand = settings?.primary_color || '#C2185B';
 
+  // Calculate card amount for split payments
+  const cashAmountNum = parseFloat(cashAmount) || 0;
+  const cardAmount = paymentMethod === 'split' ? Math.max(0, total - cashAmountNum) : total;
+
   useEffect(() => {
     if (!isOpen) {
       const timer = setTimeout(() => {
         setStep('cart');
         setResult(null);
+        setPaymentMethod('card');
+        setCashAmount('');
         setCardName('');
         setCardNumber('');
         setCardExp('');
         setCardCvv('');
         setErrors({});
+        setStockError(null);
       }, 300);
       return () => clearTimeout(timer);
     }
@@ -39,12 +49,51 @@ export default function CartDrawer({ settings }) {
 
   const validatePayment = () => {
     const e = {};
-    if (!cardName.trim()) e.cardName = 'Name is required';
-    if (!cardNumber.replace(/\s/g, '') || cardNumber.replace(/\s/g, '').length < 13) e.cardNumber = 'Valid card number required';
-    if (!cardExp || !/^\d{2}\/?\d{2,4}$/.test(cardExp.replace(/\s/g, ''))) e.cardExp = 'Valid expiration required (MMYY)';
-    if (!cardCvv || cardCvv.length < 3) e.cardCvv = 'Valid CVV required';
+
+    if (paymentMethod === 'split') {
+      if (!cashAmount || cashAmountNum <= 0) {
+        e.cashAmount = 'Enter cash amount';
+      } else if (cashAmountNum >= total) {
+        e.cashAmount = 'Cash amount must be less than total';
+      }
+    }
+
+    if (paymentMethod === 'card' || paymentMethod === 'split') {
+      if (!cardName.trim()) e.cardName = 'Name is required';
+      if (!cardNumber.replace(/\s/g, '') || cardNumber.replace(/\s/g, '').length < 13) e.cardNumber = 'Valid card number required';
+      if (!cardExp || !/^\d{2}\/?\d{2,4}$/.test(cardExp.replace(/\s/g, ''))) e.cardExp = 'Valid expiration required (MMYY)';
+      if (!cardCvv || cardCvv.length < 3) e.cardCvv = 'Valid CVV required';
+    }
+
     setErrors(e);
     return Object.keys(e).length === 0;
+  };
+
+  const handleProceedToPayment = async () => {
+    setStockError(null);
+    setProcessing(true);
+
+    try {
+      // Check stock availability
+      const stockResult = await api.checkStock(
+        items.map(i => ({ id: i.id, name: i.name, qty: i.qty, variant: i.variant || null }))
+      );
+
+      if (!stockResult.available) {
+        const insufficientItems = stockResult.items.filter(i => !i.sufficient);
+        const messages = insufficientItems.map(i =>
+          `${i.name}${i.variant ? ` (${i.variant})` : ''}: only ${i.available} available`
+        );
+        setStockError(messages.join(', '));
+        return;
+      }
+
+      setStep('payment');
+    } catch (err) {
+      toast.error('Could not verify stock availability');
+    } finally {
+      setProcessing(false);
+    }
   };
 
   const handleCheckout = async () => {
@@ -52,13 +101,23 @@ export default function CartDrawer({ settings }) {
     setProcessing(true);
     try {
       const expClean = cardExp.replace(/[\/\s]/g, '');
-      const data = await api.checkout({
+      const checkoutData = {
         items: items.map(i => ({ id: i.id, name: i.name, price: i.price, qty: i.qty, variant: i.variant || null })),
-        card_number: cardNumber.replace(/\s/g, ''),
-        card_exp: expClean,
-        card_cvv: cardCvv,
-        card_name: cardName.trim(),
-      });
+        payment_method: paymentMethod,
+      };
+
+      if (paymentMethod === 'card' || paymentMethod === 'split') {
+        checkoutData.card_number = cardNumber.replace(/\s/g, '');
+        checkoutData.card_exp = expClean;
+        checkoutData.card_cvv = cardCvv;
+        checkoutData.card_name = cardName.trim();
+      }
+
+      if (paymentMethod === 'split') {
+        checkoutData.cash_amount = cashAmountNum;
+      }
+
+      const data = await api.checkout(checkoutData);
       setResult(data);
       if (data.success) {
         setStep('confirmation');
@@ -159,6 +218,12 @@ export default function CartDrawer({ settings }) {
                       >✕</button>
                     </div>
                   ))}
+
+                  {stockError && (
+                    <div style={s.stockErrorBox}>
+                      <strong>Stock Issue:</strong> {stockError}
+                    </div>
+                  )}
                 </div>
               )}
             </>
@@ -167,64 +232,139 @@ export default function CartDrawer({ settings }) {
           {/* STEP: Payment */}
           {step === 'payment' && (
             <div style={s.paymentForm}>
-              <div style={s.formField}>
-                <label style={s.formLabel}>Cardholder Name</label>
-                <input
-                  value={cardName}
-                  onChange={e => { setCardName(e.target.value); setErrors(p => ({ ...p, cardName: '' })); }}
-                  style={{ ...s.formInput, ...(errors.cardName ? s.inputError : {}) }}
-                  placeholder="Jane Smith"
-                />
-                {errors.cardName && <span style={s.errorText}>{errors.cardName}</span>}
-              </div>
-              <div style={s.formField}>
-                <label style={s.formLabel}>Card Number</label>
-                <input
-                  value={cardNumber}
-                  onChange={e => {
-                    const val = e.target.value.replace(/\D/g, '').substring(0, 16);
-                    setCardNumber(val.replace(/(.{4})/g, '$1 ').trim());
-                    setErrors(p => ({ ...p, cardNumber: '' }));
-                  }}
-                  style={{ ...s.formInput, ...(errors.cardNumber ? s.inputError : {}) }}
-                  placeholder="4111 1111 1111 1111"
-                  inputMode="numeric"
-                />
-                {errors.cardNumber && <span style={s.errorText}>{errors.cardNumber}</span>}
-              </div>
-              <div style={{ display: 'flex', gap: 14 }}>
-                <div style={{ ...s.formField, flex: 1 }}>
-                  <label style={s.formLabel}>Expiration</label>
-                  <input
-                    value={cardExp}
-                    onChange={e => {
-                      let val = e.target.value.replace(/\D/g, '').substring(0, 4);
-                      if (val.length > 2) val = val.substring(0, 2) + '/' + val.substring(2);
-                      setCardExp(val);
-                      setErrors(p => ({ ...p, cardExp: '' }));
-                    }}
-                    style={{ ...s.formInput, ...(errors.cardExp ? s.inputError : {}) }}
-                    placeholder="MM/YY"
-                    inputMode="numeric"
-                  />
-                  {errors.cardExp && <span style={s.errorText}>{errors.cardExp}</span>}
-                </div>
-                <div style={{ ...s.formField, flex: 1 }}>
-                  <label style={s.formLabel}>CVV</label>
-                  <input
-                    value={cardCvv}
-                    onChange={e => {
-                      setCardCvv(e.target.value.replace(/\D/g, '').substring(0, 4));
-                      setErrors(p => ({ ...p, cardCvv: '' }));
-                    }}
-                    style={{ ...s.formInput, ...(errors.cardCvv ? s.inputError : {}) }}
-                    placeholder="123"
-                    inputMode="numeric"
-                    type="password"
-                  />
-                  {errors.cardCvv && <span style={s.errorText}>{errors.cardCvv}</span>}
+              {/* Payment Method Selector */}
+              <div style={s.paymentMethodSection}>
+                <label style={s.formLabel}>Payment Method</label>
+                <div style={s.paymentMethods}>
+                  {[
+                    { id: 'card', label: 'Card', icon: '💳' },
+                    { id: 'cash', label: 'Cash', icon: '💵' },
+                    { id: 'split', label: 'Split', icon: '↔' },
+                  ].map(pm => (
+                    <button
+                      key={pm.id}
+                      onClick={() => setPaymentMethod(pm.id)}
+                      style={{
+                        ...s.paymentMethodBtn,
+                        ...(paymentMethod === pm.id ? { borderColor: brand, background: `${brand}15` } : {}),
+                      }}
+                    >
+                      <span style={s.pmIcon}>{pm.icon}</span>
+                      <span style={s.pmLabel}>{pm.label}</span>
+                    </button>
+                  ))}
                 </div>
               </div>
+
+              {/* Split Payment: Cash Amount First */}
+              {paymentMethod === 'split' && (
+                <div style={s.splitSection}>
+                  <div style={s.formField}>
+                    <label style={s.formLabel}>Cash Amount</label>
+                    <div style={s.cashInputWrap}>
+                      <span style={s.cashPrefix}>$</span>
+                      <input
+                        value={cashAmount}
+                        onChange={e => {
+                          setCashAmount(e.target.value.replace(/[^\d.]/g, ''));
+                          setErrors(p => ({ ...p, cashAmount: '' }));
+                        }}
+                        style={{ ...s.formInput, ...s.cashInput, ...(errors.cashAmount ? s.inputError : {}) }}
+                        placeholder="0.00"
+                        inputMode="decimal"
+                      />
+                    </div>
+                    {errors.cashAmount && <span style={s.errorText}>{errors.cashAmount}</span>}
+                  </div>
+                  <div style={s.splitSummary}>
+                    <div style={s.splitRow}>
+                      <span>Cash</span>
+                      <span>${cashAmountNum.toFixed(2)}</span>
+                    </div>
+                    <div style={s.splitRow}>
+                      <span>Remaining on Card</span>
+                      <span style={{ color: brand, fontWeight: 600 }}>${cardAmount.toFixed(2)}</span>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Cash Payment Info */}
+              {paymentMethod === 'cash' && (
+                <div style={s.cashInfo}>
+                  <div style={s.cashInfoIcon}>💵</div>
+                  <p style={s.cashInfoText}>
+                    Collect <strong>${total.toFixed(2)}</strong> in cash from customer.
+                  </p>
+                </div>
+              )}
+
+              {/* Card Fields - show for card and split */}
+              {(paymentMethod === 'card' || paymentMethod === 'split') && (
+                <>
+                  {paymentMethod === 'split' && cardAmount > 0 && (
+                    <div style={s.cardSectionHeader}>Card Payment Details</div>
+                  )}
+                  <div style={s.formField}>
+                    <label style={s.formLabel}>Cardholder Name</label>
+                    <input
+                      value={cardName}
+                      onChange={e => { setCardName(e.target.value); setErrors(p => ({ ...p, cardName: '' })); }}
+                      style={{ ...s.formInput, ...(errors.cardName ? s.inputError : {}) }}
+                      placeholder="Jane Smith"
+                    />
+                    {errors.cardName && <span style={s.errorText}>{errors.cardName}</span>}
+                  </div>
+                  <div style={s.formField}>
+                    <label style={s.formLabel}>Card Number</label>
+                    <input
+                      value={cardNumber}
+                      onChange={e => {
+                        const val = e.target.value.replace(/\D/g, '').substring(0, 16);
+                        setCardNumber(val.replace(/(.{4})/g, '$1 ').trim());
+                        setErrors(p => ({ ...p, cardNumber: '' }));
+                      }}
+                      style={{ ...s.formInput, ...(errors.cardNumber ? s.inputError : {}) }}
+                      placeholder="4111 1111 1111 1111"
+                      inputMode="numeric"
+                    />
+                    {errors.cardNumber && <span style={s.errorText}>{errors.cardNumber}</span>}
+                  </div>
+                  <div style={{ display: 'flex', gap: 14 }}>
+                    <div style={{ ...s.formField, flex: 1 }}>
+                      <label style={s.formLabel}>Expiration</label>
+                      <input
+                        value={cardExp}
+                        onChange={e => {
+                          let val = e.target.value.replace(/\D/g, '').substring(0, 4);
+                          if (val.length > 2) val = val.substring(0, 2) + '/' + val.substring(2);
+                          setCardExp(val);
+                          setErrors(p => ({ ...p, cardExp: '' }));
+                        }}
+                        style={{ ...s.formInput, ...(errors.cardExp ? s.inputError : {}) }}
+                        placeholder="MM/YY"
+                        inputMode="numeric"
+                      />
+                      {errors.cardExp && <span style={s.errorText}>{errors.cardExp}</span>}
+                    </div>
+                    <div style={{ ...s.formField, flex: 1 }}>
+                      <label style={s.formLabel}>CVV</label>
+                      <input
+                        value={cardCvv}
+                        onChange={e => {
+                          setCardCvv(e.target.value.replace(/\D/g, '').substring(0, 4));
+                          setErrors(p => ({ ...p, cardCvv: '' }));
+                        }}
+                        style={{ ...s.formInput, ...(errors.cardCvv ? s.inputError : {}) }}
+                        placeholder="123"
+                        inputMode="numeric"
+                        type="password"
+                      />
+                      {errors.cardCvv && <span style={s.errorText}>{errors.cardCvv}</span>}
+                    </div>
+                  </div>
+                </>
+              )}
             </div>
           )}
 
@@ -248,6 +388,23 @@ export default function CartDrawer({ settings }) {
                   <span>Total</span>
                   <span>${result.total?.toFixed(2)}</span>
                 </div>
+
+                {/* Payment breakdown */}
+                <div style={s.paymentBreakdown}>
+                  {result.payment_method === 'card' && (
+                    <div style={s.paymentLine}>Card: ${result.card_amount?.toFixed(2)}</div>
+                  )}
+                  {result.payment_method === 'cash' && (
+                    <div style={s.paymentLine}>Cash: ${result.cash_amount?.toFixed(2)}</div>
+                  )}
+                  {result.payment_method === 'split' && (
+                    <>
+                      <div style={s.paymentLine}>Cash: ${result.cash_amount?.toFixed(2)}</div>
+                      <div style={s.paymentLine}>Card: ${result.card_amount?.toFixed(2)}</div>
+                    </>
+                  )}
+                </div>
+
                 <div style={s.receiptRef}>
                   Ref: {result.ref}
                 </div>
@@ -286,10 +443,11 @@ export default function CartDrawer({ settings }) {
 
             {step === 'cart' ? (
               <button
-                onClick={() => setStep('payment')}
-                style={{ ...s.checkoutBtn, background: brand }}
+                onClick={handleProceedToPayment}
+                disabled={processing}
+                style={{ ...s.checkoutBtn, background: brand, opacity: processing ? 0.7 : 1 }}
               >
-                Proceed to Payment
+                {processing ? 'Checking Stock...' : 'Proceed to Payment'}
               </button>
             ) : (
               <div style={{ display: 'flex', gap: 10 }}>
@@ -299,7 +457,10 @@ export default function CartDrawer({ settings }) {
                   disabled={processing}
                   style={{ ...s.checkoutBtn, background: brand, flex: 1, opacity: processing ? 0.7 : 1 }}
                 >
-                  {processing ? 'Processing...' : `Pay $${total.toFixed(2)}`}
+                  {processing ? 'Processing...' :
+                   paymentMethod === 'cash' ? `Confirm Cash $${total.toFixed(2)}` :
+                   paymentMethod === 'split' ? `Pay $${cardAmount.toFixed(2)} on Card` :
+                   `Pay $${total.toFixed(2)}`}
                 </button>
               </div>
             )}
@@ -432,13 +593,91 @@ const s = {
   qtyValue: { width: 28, textAlign: 'center', fontSize: '0.85rem', fontWeight: 600, color: 'var(--kiosk-text)' },
   removeBtn: { width: 32, height: 32, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--kiosk-text-secondary)', fontSize: '0.8rem', minWidth: 44, minHeight: 44, padding: '6px' },
 
+  stockErrorBox: {
+    padding: '14px 16px',
+    background: 'rgba(239, 83, 80, 0.1)',
+    border: '1px solid rgba(239, 83, 80, 0.3)',
+    borderRadius: 'var(--radius-md)',
+    color: '#ef5350',
+    fontSize: '0.85rem',
+    lineHeight: 1.5,
+  },
+
   // Payment form
-  paymentForm: { display: 'flex', flexDirection: 'column', gap: 18, paddingTop: 8 },
+  paymentForm: { display: 'flex', flexDirection: 'column', gap: 18, paddingTop: 8, paddingBottom: 20 },
   formField: { display: 'flex', flexDirection: 'column', gap: 6 },
   formLabel: { fontSize: '0.75rem', fontWeight: 500, color: 'var(--kiosk-text-secondary)', textTransform: 'uppercase', letterSpacing: '0.06em' },
   formInput: { padding: '14px 16px', fontSize: '0.95rem', background: 'var(--kiosk-card)', border: '1.5px solid var(--kiosk-border)', borderRadius: 'var(--radius-md)', color: 'var(--kiosk-text)', outline: 'none', transition: 'border-color 0.2s' },
   inputError: { borderColor: '#C2185B', boxShadow: '0 0 0 3px rgba(194, 24, 91, 0.15)' },
   errorText: { fontSize: '0.75rem', color: '#e57373', fontWeight: 500 },
+
+  // Payment method selector
+  paymentMethodSection: { marginBottom: 8 },
+  paymentMethods: { display: 'flex', gap: 10, marginTop: 8 },
+  paymentMethodBtn: {
+    flex: 1,
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    gap: 6,
+    padding: '16px 12px',
+    background: 'var(--kiosk-card)',
+    border: '2px solid var(--kiosk-border)',
+    borderRadius: 'var(--radius-md)',
+    cursor: 'pointer',
+    transition: 'all 0.2s',
+  },
+  pmIcon: { fontSize: '1.4rem' },
+  pmLabel: { fontSize: '0.8rem', fontWeight: 600, color: 'var(--kiosk-text)' },
+
+  // Split payment
+  splitSection: {
+    background: 'var(--kiosk-card)',
+    borderRadius: 'var(--radius-md)',
+    padding: 16,
+    marginBottom: 8,
+  },
+  cashInputWrap: { position: 'relative', display: 'flex', alignItems: 'center' },
+  cashPrefix: {
+    position: 'absolute',
+    left: 16,
+    color: 'var(--kiosk-text-secondary)',
+    fontSize: '0.95rem',
+    fontWeight: 500,
+  },
+  cashInput: { paddingLeft: 32 },
+  splitSummary: {
+    marginTop: 16,
+    paddingTop: 12,
+    borderTop: '1px solid var(--kiosk-border)',
+  },
+  splitRow: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    fontSize: '0.88rem',
+    color: 'var(--kiosk-text-secondary)',
+    padding: '6px 0',
+  },
+
+  // Cash payment
+  cashInfo: {
+    textAlign: 'center',
+    padding: '32px 20px',
+    background: 'var(--kiosk-card)',
+    borderRadius: 'var(--radius-md)',
+  },
+  cashInfoIcon: { fontSize: '3rem', marginBottom: 12 },
+  cashInfoText: { fontSize: '1rem', color: 'var(--kiosk-text)', lineHeight: 1.6 },
+
+  cardSectionHeader: {
+    fontSize: '0.8rem',
+    fontWeight: 600,
+    color: 'var(--kiosk-text-secondary)',
+    textTransform: 'uppercase',
+    letterSpacing: '0.06em',
+    marginTop: 8,
+    marginBottom: -4,
+  },
 
   // Confirmation
   confirmation: { textAlign: 'center', padding: '40px 0' },
@@ -448,6 +687,16 @@ const s = {
   receiptCard: { background: 'var(--kiosk-card)', borderRadius: 'var(--radius-md)', padding: '20px', textAlign: 'left' },
   receiptRow: { display: 'flex', justifyContent: 'space-between', padding: '8px 0', fontSize: '0.88rem', color: 'var(--kiosk-text-secondary)' },
   receiptTotal: { fontWeight: 600, fontSize: '1rem', color: 'var(--kiosk-text)', borderTop: '1px solid var(--kiosk-border)', marginTop: 8, paddingTop: 12 },
+  paymentBreakdown: {
+    marginTop: 12,
+    paddingTop: 12,
+    borderTop: '1px solid var(--kiosk-border)',
+  },
+  paymentLine: {
+    fontSize: '0.82rem',
+    color: 'var(--kiosk-text-secondary)',
+    padding: '4px 0',
+  },
   receiptRef: { fontSize: '0.78rem', color: 'var(--kiosk-text-secondary)', marginTop: 12, textAlign: 'center' },
   simBadge: { marginTop: 12, fontSize: '0.7rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.1em', color: '#ff9800', textAlign: 'center', padding: '6px 12px', background: 'rgba(255, 152, 0, 0.1)', borderRadius: 'var(--radius-sm)', border: '1px solid rgba(255, 152, 0, 0.2)' },
 

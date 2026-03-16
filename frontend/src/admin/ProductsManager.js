@@ -226,9 +226,9 @@ export default function ProductsManager() {
               <div style={{ width: 80, textAlign: 'center' }}>
                 <span style={{
                   ...styles.stockBadge,
-                  ...(product.in_stock ? styles.stockIn : styles.stockOut),
+                  ...(product.stock_qty > 0 ? styles.stockIn : styles.stockOut),
                 }}>
-                  {product.in_stock ? 'In Stock' : 'Out'}
+                  {product.stock_qty > 0 ? product.stock_qty : 'Out'}
                 </span>
               </div>
               <div style={{ width: 140, display: 'flex', gap: 4, justifyContent: 'flex-end' }}>
@@ -270,7 +270,7 @@ function ProductForm({ product, categories, onSave, onCancel }) {
   const [description, setDescription] = useState(product?.description || '');
   const [price, setPrice] = useState(product?.price?.toString() || '');
   const [category, setCategory] = useState(product?.category || '');
-  const [inStock, setInStock] = useState(product?.in_stock ?? 1);
+  const [stockQty, setStockQty] = useState(product?.stock_qty?.toString() || '0');
   const [sortOrder, setSortOrder] = useState(product?.sort_order?.toString() || '0');
   const [variants, setVariants] = useState(product?.variants || []);
   const [imageFile, setImageFile] = useState(null);
@@ -281,7 +281,7 @@ function ProductForm({ product, categories, onSave, onCancel }) {
   const toast = useToast();
 
   const addVariant = () => {
-    setVariants([...variants, { name: '', color_code: '#C2185B', image: '', in_stock: true }]);
+    setVariants([...variants, { name: '', color_code: '#C2185B', image: '', stock_qty: 10 }]);
   };
 
   const updateVariant = (index, field, value) => {
@@ -350,7 +350,7 @@ function ProductForm({ product, categories, onSave, onCancel }) {
       fd.append('description', description);
       fd.append('price', parseFloat(price));
       fd.append('category', category || 'General');
-      fd.append('in_stock', inStock);
+      fd.append('stock_qty', parseInt(stockQty) || 0);
       fd.append('sort_order', parseInt(sortOrder) || 0);
       fd.append('variants', JSON.stringify(variants));
       if (imageFile) fd.append('image', imageFile);
@@ -463,15 +463,16 @@ function ProductForm({ product, categories, onSave, onCancel }) {
                         style={{ ...formStyles.input, flex: 1 }}
                         placeholder="Color name (e.g. Red)"
                       />
-                      <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: '0.8rem', color: 'var(--admin-text-secondary)' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <label style={{ fontSize: '0.75rem', color: 'var(--admin-text-hint)', whiteSpace: 'nowrap' }}>Stock:</label>
                         <input
-                          type="checkbox"
-                          checked={v.in_stock !== false}
-                          onChange={e => updateVariant(idx, 'in_stock', e.target.checked)}
-                          style={{ width: 16, height: 16 }}
+                          type="number"
+                          min="0"
+                          value={v.stock_qty ?? 0}
+                          onChange={e => updateVariant(idx, 'stock_qty', parseInt(e.target.value) || 0)}
+                          style={{ ...formStyles.input, width: 70, padding: '8px 10px', textAlign: 'center' }}
                         />
-                        In Stock
-                      </label>
+                      </div>
                       <button
                         type="button"
                         onClick={() => removeVariant(idx)}
@@ -517,7 +518,7 @@ function ProductForm({ product, categories, onSave, onCancel }) {
               + Add Color Variant
             </button>
             <p style={{ fontSize: '0.75rem', color: 'var(--admin-text-hint)', marginTop: 8 }}>
-              Each variant can have its own color swatch, image, and stock status. Leave empty if product has no variants.
+              Each variant has its own color swatch, image, and stock quantity. Leave empty if product has no variants.
             </p>
           </div>
 
@@ -550,25 +551,21 @@ function ProductForm({ product, categories, onSave, onCancel }) {
             </div>
           </div>
 
-          <div style={formStyles.field}>
-            <label style={formStyles.toggleLabel}>
+          <div style={formStyles.row}>
+            <div style={formStyles.field}>
+              <label style={formStyles.label}>Stock Quantity</label>
               <input
-                type="checkbox"
-                checked={!!inStock}
-                onChange={e => setInStock(e.target.checked ? 1 : 0)}
-                style={formStyles.checkbox}
+                type="number"
+                min="0"
+                value={stockQty}
+                onChange={e => setStockQty(e.target.value)}
+                style={formStyles.input}
+                placeholder="0"
               />
-              <span style={{
-                ...formStyles.toggle,
-                background: inStock ? 'var(--brand)' : 'var(--admin-border)',
-              }}>
-                <span style={{
-                  ...formStyles.toggleDot,
-                  transform: inStock ? 'translateX(18px)' : 'translateX(2px)',
-                }} />
-              </span>
-              In Stock
-            </label>
+              <p style={{ fontSize: '0.75rem', color: 'var(--admin-text-hint)', marginTop: 4 }}>
+                {variants.length > 0 ? 'For products with variants, set stock per variant above' : 'Enter 0 if out of stock'}
+              </p>
+            </div>
           </div>
 
           <div style={formStyles.actions}>

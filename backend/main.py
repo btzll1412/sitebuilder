@@ -85,7 +85,7 @@ def init_db():
             price REAL NOT NULL,
             image TEXT DEFAULT '',
             category TEXT DEFAULT 'General',
-            in_stock INTEGER DEFAULT 1,
+            stock_qty INTEGER DEFAULT 0,
             sort_order INTEGER DEFAULT 0,
             variants TEXT DEFAULT '[]',
             created_at TEXT DEFAULT (datetime('now'))
@@ -126,9 +126,39 @@ def init_db():
             total REAL NOT NULL,
             payment_ref TEXT DEFAULT '',
             status TEXT DEFAULT 'pending',
+            card_last4 TEXT DEFAULT NULL,
+            payment_method TEXT DEFAULT 'card',
+            card_amount REAL DEFAULT 0,
+            cash_amount REAL DEFAULT 0,
             created_at TEXT DEFAULT (datetime('now'))
         );
     """)
+
+    # Migration: rename in_stock to stock_qty if old column exists
+    try:
+        cols = [row[1] for row in cur.execute("PRAGMA table_info(products)").fetchall()]
+        if "in_stock" in cols and "stock_qty" not in cols:
+            cur.execute("ALTER TABLE products RENAME COLUMN in_stock TO stock_qty")
+            # Convert boolean to quantity (1 -> 10, 0 -> 0)
+            cur.execute("UPDATE products SET stock_qty = CASE WHEN stock_qty = 1 THEN 10 ELSE 0 END")
+        elif "stock_qty" not in cols:
+            cur.execute("ALTER TABLE products ADD COLUMN stock_qty INTEGER DEFAULT 0")
+    except Exception:
+        pass
+
+    # Migration: add order payment columns if missing
+    try:
+        cols = [row[1] for row in cur.execute("PRAGMA table_info(orders)").fetchall()]
+        if "card_last4" not in cols:
+            cur.execute("ALTER TABLE orders ADD COLUMN card_last4 TEXT DEFAULT NULL")
+        if "payment_method" not in cols:
+            cur.execute("ALTER TABLE orders ADD COLUMN payment_method TEXT DEFAULT 'card'")
+        if "card_amount" not in cols:
+            cur.execute("ALTER TABLE orders ADD COLUMN card_amount REAL DEFAULT 0")
+        if "cash_amount" not in cols:
+            cur.execute("ALTER TABLE orders ADD COLUMN cash_amount REAL DEFAULT 0")
+    except Exception:
+        pass
 
     # Seed only if empty
     admin_count = cur.execute("SELECT COUNT(*) FROM admins").fetchone()[0]
@@ -147,19 +177,19 @@ def _seed_data(cur: sqlite3.Cursor):
         ("admin", pw_hash),
     )
 
-    # Sample products
+    # Sample products with stock quantities
     products = [
-        ("Velvet Matte Lipstick", "Long-wearing matte finish in a universally flattering rose shade. Enriched with vitamin E for all-day comfort.", 24.00, "Lips", 1),
-        ("Hydra Gloss Lip Oil", "Sheer, glossy color with nourishing jojoba and rosehip oils. Buildable coverage that never feels sticky.", 18.00, "Lips", 2),
-        ("Precision Lip Liner", "Creamy, transfer-proof formula that defines and shapes. Pairs perfectly with any lip color.", 14.00, "Lips", 3),
-        ("Smoky Eye Palette", "Six richly pigmented shades from champagne to midnight. Buttery-soft formula blends effortlessly.", 38.00, "Eyes", 4),
-        ("Volumizing Mascara", "Dramatic volume and length without clumping. Buildable formula with a curved precision brush.", 22.00, "Eyes", 5),
-        ("Luminous Skin Tint", "Lightweight, buildable coverage with a natural radiant finish. SPF 30 protection with skincare benefits.", 32.00, "Face", 6),
+        ("Velvet Matte Lipstick", "Long-wearing matte finish in a universally flattering rose shade. Enriched with vitamin E for all-day comfort.", 24.00, "Lips", 1, 15),
+        ("Hydra Gloss Lip Oil", "Sheer, glossy color with nourishing jojoba and rosehip oils. Buildable coverage that never feels sticky.", 18.00, "Lips", 2, 20),
+        ("Precision Lip Liner", "Creamy, transfer-proof formula that defines and shapes. Pairs perfectly with any lip color.", 14.00, "Lips", 3, 25),
+        ("Smoky Eye Palette", "Six richly pigmented shades from champagne to midnight. Buttery-soft formula blends effortlessly.", 38.00, "Eyes", 4, 8),
+        ("Volumizing Mascara", "Dramatic volume and length without clumping. Buildable formula with a curved precision brush.", 22.00, "Eyes", 5, 30),
+        ("Luminous Skin Tint", "Lightweight, buildable coverage with a natural radiant finish. SPF 30 protection with skincare benefits.", 32.00, "Face", 6, 12),
     ]
-    for name, desc, price, cat, sort in products:
+    for name, desc, price, cat, sort, stock in products:
         cur.execute(
-            "INSERT INTO products (name, description, price, category, sort_order) VALUES (?, ?, ?, ?, ?)",
-            (name, desc, price, cat, sort),
+            "INSERT INTO products (name, description, price, category, stock_qty, sort_order) VALUES (?, ?, ?, ?, ?, ?)",
+            (name, desc, price, cat, stock, sort),
         )
 
     # Home page with hero + product grid
@@ -206,6 +236,7 @@ def _seed_data(cur: sqlite3.Cursor):
         "usaepay_pin": "",
         "usaepay_sandbox": "1",
         "timezone": "America/New_York",
+        "low_stock_threshold": "5",
     }
     for k, v in defaults.items():
         cur.execute(
@@ -371,19 +402,26 @@ async def get_products(category: Optional[str] = None):
     try:
         conn = get_db()
         try:
+            # Get low stock threshold
+            threshold_row = conn.execute(
+                "SELECT value FROM site_settings WHERE key = 'low_stock_threshold'"
+            ).fetchone()
+            low_stock_threshold = int(threshold_row["value"]) if threshold_row else 5
+
             if category and category != "all":
                 rows = conn.execute(
-                    "SELECT * FROM products WHERE in_stock = 1 AND category = ? ORDER BY sort_order",
+                    "SELECT * FROM products WHERE stock_qty > 0 AND category = ? ORDER BY sort_order",
                     (category,),
                 ).fetchall()
             else:
                 rows = conn.execute(
-                    "SELECT * FROM products WHERE in_stock = 1 ORDER BY sort_order"
+                    "SELECT * FROM products WHERE stock_qty > 0 ORDER BY sort_order"
                 ).fetchall()
             results = []
             for r in rows:
                 d = dict(r)
                 d["variants"] = json.loads(d.get("variants") or "[]")
+                d["low_stock_threshold"] = low_stock_threshold
                 results.append(d)
             return results
         finally:
@@ -418,7 +456,7 @@ async def get_categories():
         conn = get_db()
         try:
             rows = conn.execute(
-                "SELECT DISTINCT category FROM products WHERE in_stock = 1 ORDER BY category"
+                "SELECT DISTINCT category FROM products WHERE stock_qty > 0 ORDER BY category"
             ).fetchall()
             return [r["category"] for r in rows]
         finally:
@@ -437,8 +475,16 @@ async def get_product(product_id: int):
             ).fetchone()
             if not row:
                 raise HTTPException(status_code=404, detail="Product not found")
+
+            # Get low stock threshold
+            threshold_row = conn.execute(
+                "SELECT value FROM site_settings WHERE key = 'low_stock_threshold'"
+            ).fetchone()
+            low_stock_threshold = int(threshold_row["value"]) if threshold_row else 5
+
             result = dict(row)
             result["variants"] = json.loads(result.get("variants") or "[]")
+            result["low_stock_threshold"] = low_stock_threshold
             return result
         finally:
             conn.close()
@@ -454,7 +500,7 @@ async def create_product(
     price: float = Form(...),
     description: str = Form(""),
     category: str = Form("General"),
-    in_stock: int = Form(1),
+    stock_qty: int = Form(0),
     sort_order: int = Form(0),
     variants: str = Form("[]"),
     image: Optional[UploadFile] = File(None),
@@ -473,8 +519,8 @@ async def create_product(
         conn = get_db()
         try:
             cur = conn.execute(
-                "INSERT INTO products (name, description, price, image, category, in_stock, sort_order, variants) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                (name.strip(), description, price, image_path, category, in_stock, sort_order, variants),
+                "INSERT INTO products (name, description, price, image, category, stock_qty, sort_order, variants) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (name.strip(), description, price, image_path, category, stock_qty, sort_order, variants),
             )
             conn.commit()
             product = conn.execute(
@@ -498,7 +544,7 @@ async def update_product(
     price: float = Form(...),
     description: str = Form(""),
     category: str = Form("General"),
-    in_stock: int = Form(1),
+    stock_qty: int = Form(0),
     sort_order: int = Form(0),
     variants: str = Form("[]"),
     image: Optional[UploadFile] = File(None),
@@ -523,8 +569,8 @@ async def update_product(
                 image_path = await _save_upload(image)
 
             conn.execute(
-                "UPDATE products SET name=?, description=?, price=?, image=?, category=?, in_stock=?, sort_order=?, variants=? WHERE id=?",
-                (name.strip(), description, price, image_path, category, in_stock, sort_order, variants, product_id),
+                "UPDATE products SET name=?, description=?, price=?, image=?, category=?, stock_qty=?, sort_order=?, variants=? WHERE id=?",
+                (name.strip(), description, price, image_path, category, stock_qty, sort_order, variants, product_id),
             )
             conn.commit()
             product = conn.execute(
@@ -733,7 +779,8 @@ async def delete_page(page_id: int, admin_id: int = Depends(verify_token)):
 
 SAFE_SETTINGS = [
     "site_name", "logo_text", "tax_rate", "primary_color", "accent_color",
-    "bg_color", "bg_image", "surface_color", "card_color", "text_color", "timezone"
+    "bg_color", "bg_image", "surface_color", "card_color", "text_color", "timezone",
+    "low_stock_threshold"
 ]
 ALL_SETTINGS = SAFE_SETTINGS + ["usaepay_key", "usaepay_pin", "usaepay_sandbox"]
 
@@ -799,6 +846,8 @@ async def checkout(request: Request):
     try:
         body = await request.json()
         items = body.get("items", [])
+        payment_method = body.get("payment_method", "card")  # card, cash, split
+        cash_amount = float(body.get("cash_amount", 0))
         card_number = body.get("card_number", "")
         card_exp = body.get("card_exp", "")
         card_cvv = body.get("card_cvv", "")
@@ -806,8 +855,16 @@ async def checkout(request: Request):
 
         if not items:
             raise HTTPException(status_code=400, detail="Cart is empty")
-        if not card_number or not card_exp or not card_cvv or not card_name:
-            raise HTTPException(status_code=400, detail="All card fields are required")
+
+        # Validate payment method requirements
+        if payment_method == "card":
+            if not card_number or not card_exp or not card_cvv or not card_name:
+                raise HTTPException(status_code=400, detail="All card fields are required")
+        elif payment_method == "split":
+            if cash_amount <= 0:
+                raise HTTPException(status_code=400, detail="Cash amount required for split payment")
+            if not card_number or not card_exp or not card_cvv or not card_name:
+                raise HTTPException(status_code=400, detail="Card details required for split payment")
 
         # Calculate totals
         subtotal = sum(item["price"] * item["qty"] for item in items)
@@ -824,90 +881,185 @@ async def checkout(request: Request):
         tax = round(subtotal * tax_rate / 100, 2)
         total = round(subtotal + tax, 2)
 
-        # Check for USAePay keys
+        # Validate stock availability before processing payment
         conn = get_db()
         try:
-            key_row = conn.execute(
-                "SELECT value FROM site_settings WHERE key = 'usaepay_key'"
-            ).fetchone()
-            usaepay_key = key_row["value"] if key_row else ""
+            for item in items:
+                product = conn.execute(
+                    "SELECT * FROM products WHERE id = ?", (item["id"],)
+                ).fetchone()
+                if not product:
+                    raise HTTPException(status_code=400, detail=f"Product not found: {item['name']}")
+
+                variants = json.loads(product["variants"] or "[]")
+                item_variant = item.get("variant")
+
+                if variants and item_variant:
+                    # Check variant stock
+                    variant = next((v for v in variants if v["name"] == item_variant), None)
+                    if not variant:
+                        raise HTTPException(status_code=400, detail=f"Variant not found: {item['name']} - {item_variant}")
+                    available = variant.get("stock_qty", 0)
+                    if item["qty"] > available:
+                        raise HTTPException(
+                            status_code=400,
+                            detail=f"Insufficient stock for {item['name']} ({item_variant}). Only {available} available."
+                        )
+                else:
+                    # Check product-level stock
+                    available = product["stock_qty"]
+                    if item["qty"] > available:
+                        raise HTTPException(
+                            status_code=400,
+                            detail=f"Insufficient stock for {item['name']}. Only {available} available."
+                        )
         finally:
             conn.close()
+
+        # Calculate payment amounts
+        card_amount = 0.0
+        final_cash_amount = 0.0
+
+        if payment_method == "cash":
+            final_cash_amount = total
+        elif payment_method == "card":
+            card_amount = total
+        elif payment_method == "split":
+            final_cash_amount = min(cash_amount, total)
+            card_amount = round(total - final_cash_amount, 2)
+
+        # Extract card last 4 digits
+        card_last4 = card_number[-4:] if card_number and len(card_number) >= 4 else None
 
         simulated = False
         payment_ref = ""
         status = "pending"
 
-        if not usaepay_key:
-            # Simulation mode
-            simulated = True
-            payment_ref = f"SIM-{secrets.token_hex(4).upper()}"
-            status = "approved"
-        else:
-            # Real USAePay call
+        # Process card payment if needed
+        if card_amount > 0:
             conn = get_db()
             try:
-                pin_row = conn.execute(
-                    "SELECT value FROM site_settings WHERE key = 'usaepay_pin'"
+                key_row = conn.execute(
+                    "SELECT value FROM site_settings WHERE key = 'usaepay_key'"
                 ).fetchone()
-                sandbox_row = conn.execute(
-                    "SELECT value FROM site_settings WHERE key = 'usaepay_sandbox'"
-                ).fetchone()
-                pin = pin_row["value"] if pin_row else ""
-                sandbox = sandbox_row["value"] if sandbox_row else "1"
+                usaepay_key = key_row["value"] if key_row else ""
             finally:
                 conn.close()
 
-            base_url = (
-                "https://sandbox.usaepay.com/api/v2/transactions"
-                if sandbox == "1"
-                else "https://secure.usaepay.com/api/v2/transactions"
-            )
+            if not usaepay_key:
+                # Simulation mode
+                simulated = True
+                payment_ref = f"SIM-{secrets.token_hex(4).upper()}"
+                status = "approved"
+            else:
+                # Real USAePay call
+                conn = get_db()
+                try:
+                    pin_row = conn.execute(
+                        "SELECT value FROM site_settings WHERE key = 'usaepay_pin'"
+                    ).fetchone()
+                    sandbox_row = conn.execute(
+                        "SELECT value FROM site_settings WHERE key = 'usaepay_sandbox'"
+                    ).fetchone()
+                    pin = pin_row["value"] if pin_row else ""
+                    sandbox = sandbox_row["value"] if sandbox_row else "1"
+                finally:
+                    conn.close()
 
-            payload = {
-                "command": "cc:sale",
-                "amount": total,
-                "creditcard": {
-                    "number": card_number,
-                    "expiration": card_exp,
-                    "cvv2": card_cvv,
-                    "cardholder": card_name,
-                },
-            }
-
-            try:
-                async with httpx.AsyncClient() as client:
-                    resp = await client.post(
-                        base_url,
-                        json=payload,
-                        auth=(usaepay_key, pin),
-                        timeout=30,
-                    )
-                    data = resp.json()
-                    if data.get("result") == "Approved":
-                        payment_ref = data.get("refnum", "")
-                        status = "approved"
-                    else:
-                        status = "declined"
-                        payment_ref = data.get("error", "Payment declined")
-            except Exception:
-                raise HTTPException(
-                    status_code=502, detail="Payment processor unavailable"
+                base_url = (
+                    "https://sandbox.usaepay.com/api/v2/transactions"
+                    if sandbox == "1"
+                    else "https://secure.usaepay.com/api/v2/transactions"
                 )
 
-        # Record order (mask card number — only last 4)
+                payload = {
+                    "command": "cc:sale",
+                    "amount": card_amount,
+                    "creditcard": {
+                        "number": card_number,
+                        "expiration": card_exp,
+                        "cvv2": card_cvv,
+                        "cardholder": card_name,
+                    },
+                }
+
+                try:
+                    async with httpx.AsyncClient() as client:
+                        resp = await client.post(
+                            base_url,
+                            json=payload,
+                            auth=(usaepay_key, pin),
+                            timeout=30,
+                        )
+                        data = resp.json()
+                        if data.get("result") == "Approved":
+                            payment_ref = data.get("refnum", "")
+                            status = "approved"
+                        else:
+                            status = "declined"
+                            payment_ref = data.get("error", "Payment declined")
+                except Exception:
+                    raise HTTPException(
+                        status_code=502, detail="Payment processor unavailable"
+                    )
+        else:
+            # Cash-only payment
+            payment_ref = f"CASH-{secrets.token_hex(4).upper()}"
+            status = "approved"
+
+        # Record order with payment details
         order_items = [
-            {"id": i["id"], "name": i["name"], "price": i["price"], "qty": i["qty"]}
+            {
+                "id": i["id"],
+                "name": i["name"],
+                "price": i["price"],
+                "qty": i["qty"],
+                "variant": i.get("variant")
+            }
             for i in items
         ]
 
         conn = get_db()
         try:
             conn.execute(
-                "INSERT INTO orders (items, subtotal, tax, total, payment_ref, status) VALUES (?, ?, ?, ?, ?, ?)",
-                (json.dumps(order_items), subtotal, tax, total, payment_ref, status),
+                """INSERT INTO orders
+                   (items, subtotal, tax, total, payment_ref, status, card_last4, payment_method, card_amount, cash_amount)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (json.dumps(order_items), subtotal, tax, total, payment_ref, status,
+                 card_last4, payment_method, card_amount, final_cash_amount),
             )
             conn.commit()
+
+            # Decrement stock if payment approved
+            if status == "approved":
+                for item in items:
+                    product = conn.execute(
+                        "SELECT * FROM products WHERE id = ?", (item["id"],)
+                    ).fetchone()
+                    if not product:
+                        continue
+
+                    variants = json.loads(product["variants"] or "[]")
+                    item_variant = item.get("variant")
+
+                    if variants and item_variant:
+                        # Decrement variant stock
+                        for v in variants:
+                            if v["name"] == item_variant:
+                                v["stock_qty"] = max(0, v.get("stock_qty", 0) - item["qty"])
+                                break
+                        conn.execute(
+                            "UPDATE products SET variants = ? WHERE id = ?",
+                            (json.dumps(variants), item["id"])
+                        )
+                    else:
+                        # Decrement product-level stock
+                        new_qty = max(0, product["stock_qty"] - item["qty"])
+                        conn.execute(
+                            "UPDATE products SET stock_qty = ? WHERE id = ?",
+                            (new_qty, item["id"])
+                        )
+                conn.commit()
         finally:
             conn.close()
 
@@ -919,11 +1071,75 @@ async def checkout(request: Request):
             "tax": tax,
             "simulated": simulated,
             "status": status,
+            "payment_method": payment_method,
+            "card_amount": card_amount,
+            "cash_amount": final_cash_amount,
         }
     except HTTPException:
         raise
     except Exception:
         raise HTTPException(status_code=500, detail="Checkout failed")
+
+
+@app.post("/api/stock/check")
+async def check_stock(request: Request):
+    """Check stock availability for cart items."""
+    try:
+        body = await request.json()
+        items = body.get("items", [])
+
+        if not items:
+            return {"available": True, "items": []}
+
+        conn = get_db()
+        try:
+            result_items = []
+            all_available = True
+
+            for item in items:
+                product = conn.execute(
+                    "SELECT * FROM products WHERE id = ?", (item["id"],)
+                ).fetchone()
+
+                if not product:
+                    result_items.append({
+                        "id": item["id"],
+                        "name": item.get("name", "Unknown"),
+                        "variant": item.get("variant"),
+                        "requested": item["qty"],
+                        "available": 0,
+                        "sufficient": False
+                    })
+                    all_available = False
+                    continue
+
+                variants = json.loads(product["variants"] or "[]")
+                item_variant = item.get("variant")
+
+                if variants and item_variant:
+                    variant = next((v for v in variants if v["name"] == item_variant), None)
+                    available = variant.get("stock_qty", 0) if variant else 0
+                else:
+                    available = product["stock_qty"]
+
+                sufficient = item["qty"] <= available
+                if not sufficient:
+                    all_available = False
+
+                result_items.append({
+                    "id": item["id"],
+                    "name": item.get("name", product["name"]),
+                    "variant": item_variant,
+                    "requested": item["qty"],
+                    "available": available,
+                    "sufficient": sufficient
+                })
+
+            return {"available": all_available, "items": result_items}
+        finally:
+            conn.close()
+    except Exception:
+        raise HTTPException(status_code=500, detail="Stock check failed")
 
 
 @app.get("/api/orders")
@@ -1108,13 +1324,20 @@ async def import_backup(
 
                     # Restore products
                     for p in backup_data["tables"].get("products", []):
+                        # Handle both old (in_stock) and new (stock_qty) backups
+                        stock = p.get("stock_qty", p.get("in_stock", 0))
+                        if stock == 1 and "stock_qty" not in p:
+                            stock = 10  # Convert boolean to quantity
+                        variants = p.get("variants", "[]")
+                        if isinstance(variants, list):
+                            variants = json.dumps(variants)
                         conn.execute(
                             """INSERT INTO products
-                               (id, name, description, price, image, category, in_stock, sort_order, created_at)
-                               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                               (id, name, description, price, image, category, stock_qty, sort_order, variants, created_at)
+                               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                             (p.get("id"), p.get("name"), p.get("description", ""),
                              p.get("price"), p.get("image", ""), p.get("category", "General"),
-                             p.get("in_stock", 1), p.get("sort_order", 0), p.get("created_at"))
+                             stock, p.get("sort_order", 0), variants, p.get("created_at"))
                         )
 
                     # Restore pages
@@ -1144,11 +1367,14 @@ async def import_backup(
                             items = json.dumps(items)
                         conn.execute(
                             """INSERT INTO orders
-                               (id, items, subtotal, tax, total, payment_ref, status, created_at)
-                               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                               (id, items, subtotal, tax, total, payment_ref, status,
+                                card_last4, payment_method, card_amount, cash_amount, created_at)
+                               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                             (o.get("id"), items, o.get("subtotal"),
                              o.get("tax"), o.get("total"), o.get("payment_ref", ""),
-                             o.get("status", "pending"), o.get("created_at"))
+                             o.get("status", "pending"), o.get("card_last4"),
+                             o.get("payment_method", "card"), o.get("card_amount", o.get("total", 0)),
+                             o.get("cash_amount", 0), o.get("created_at"))
                         )
 
                     conn.commit()

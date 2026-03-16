@@ -12,20 +12,48 @@ export default function ProductDetail({ settings }) {
   const [quantity, setQuantity] = useState(1);
   const [selectedVariant, setSelectedVariant] = useState(null);
   const [displayImage, setDisplayImage] = useState('');
-  const { addItem, openCart } = useCart();
+  const { addItem, openCart, items: cartItems } = useCart();
 
   const brand = settings?.primary_color || '#C2185B';
+  const lowStockThreshold = product?.low_stock_threshold || 5;
+
+  // Get available stock for current selection
+  const getAvailableStock = () => {
+    if (!product) return 0;
+    const hasVariants = product.variants && product.variants.length > 0;
+    if (hasVariants && selectedVariant) {
+      return selectedVariant.stock_qty || 0;
+    }
+    return product.stock_qty || 0;
+  };
+
+  // Get how many are already in cart for this product/variant
+  const getCartQuantity = () => {
+    if (!product) return 0;
+    const hasVariants = product.variants && product.variants.length > 0;
+    const variantName = hasVariants && selectedVariant ? selectedVariant.name : null;
+    const cartKey = variantName ? `${product.id}_${variantName}` : `${product.id}`;
+    const cartItem = cartItems.find(i => i.cartKey === cartKey);
+    return cartItem ? cartItem.qty : 0;
+  };
+
+  const availableStock = getAvailableStock();
+  const cartQty = getCartQuantity();
+  const maxCanAdd = Math.max(0, availableStock - cartQty);
+  const isLowStock = availableStock > 0 && availableStock <= lowStockThreshold;
+  const isOutOfStock = availableStock <= 0;
 
   useEffect(() => {
     setLoading(true);
     setError(null);
+    setQuantity(1);
     api.getProduct(id)
       .then(data => {
         setProduct(data);
         setDisplayImage(data.image || '');
         // Set default variant if product has variants (pick first in-stock one)
         if (data.variants && data.variants.length > 0) {
-          const firstInStock = data.variants.find(v => v.in_stock !== false) || data.variants[0];
+          const firstInStock = data.variants.find(v => (v.stock_qty || 0) > 0) || data.variants[0];
           setSelectedVariant(firstInStock);
           if (firstInStock.image) setDisplayImage(firstInStock.image);
         }
@@ -34,8 +62,13 @@ export default function ProductDetail({ settings }) {
       .finally(() => setLoading(false));
   }, [id]);
 
+  // Reset quantity when variant changes
+  useEffect(() => {
+    setQuantity(1);
+  }, [selectedVariant]);
+
   const handleVariantSelect = (variant) => {
-    if (variant.in_stock === false) return; // Can't select out-of-stock
+    if ((variant.stock_qty || 0) <= 0) return; // Can't select out-of-stock
     setSelectedVariant(variant);
     // Update displayed image
     setDisplayImage(variant.image || product.image || '');
@@ -136,38 +169,43 @@ export default function ProductDetail({ settings }) {
               <div style={s.variantOptions}>
                 {product.variants.map((v, idx) => {
                   const isSelected = selectedVariant?.name === v.name;
-                  const isOutOfStock = v.in_stock === false;
+                  const variantOutOfStock = (v.stock_qty || 0) <= 0;
                   return (
                     <button
                       key={idx}
                       onClick={() => handleVariantSelect(v)}
-                      disabled={isOutOfStock}
-                      title={isOutOfStock ? `${v.name} - Out of Stock` : v.name}
+                      disabled={variantOutOfStock}
+                      title={variantOutOfStock ? `${v.name} - Out of Stock` : `${v.name} (${v.stock_qty} available)`}
                       style={{
                         ...s.variantSwatch,
                         background: v.color_code || '#888',
-                        opacity: isOutOfStock ? 0.35 : 1,
-                        cursor: isOutOfStock ? 'not-allowed' : 'pointer',
+                        opacity: variantOutOfStock ? 0.35 : 1,
+                        cursor: variantOutOfStock ? 'not-allowed' : 'pointer',
                         boxShadow: isSelected ? `0 0 0 3px ${brand}, 0 0 0 5px rgba(255,255,255,0.3)` : 'none',
                         transform: isSelected ? 'scale(1.1)' : 'scale(1)',
                       }}
                     >
-                      {isOutOfStock && <span style={s.outOfStockLine} />}
+                      {variantOutOfStock && <span style={s.outOfStockLine} />}
                     </button>
                   );
                 })}
               </div>
-              {selectedVariant?.in_stock === false && (
+              {selectedVariant && (selectedVariant.stock_qty || 0) <= 0 && (
                 <p style={s.outOfStockText}>This color is currently out of stock</p>
               )}
             </div>
           )}
 
           <div style={s.stockBadge}>
-            {product.in_stock ? (
-              <span style={s.inStock}>In Stock</span>
-            ) : (
+            {isOutOfStock ? (
               <span style={s.outOfStock}>Out of Stock</span>
+            ) : isLowStock ? (
+              <span style={s.lowStock}>Only {availableStock} left!</span>
+            ) : (
+              <span style={s.inStock}>In Stock</span>
+            )}
+            {cartQty > 0 && !isOutOfStock && (
+              <span style={s.cartNote}>({cartQty} in cart)</span>
             )}
           </div>
 
@@ -178,11 +216,17 @@ export default function ProductDetail({ settings }) {
               <button
                 onClick={() => setQuantity(q => Math.max(1, q - 1))}
                 style={s.qtyBtn}
+                disabled={quantity <= 1}
               >−</button>
               <span style={s.qtyValue}>{quantity}</span>
               <button
-                onClick={() => setQuantity(q => q + 1)}
-                style={s.qtyBtn}
+                onClick={() => setQuantity(q => Math.min(maxCanAdd, q + 1))}
+                style={{
+                  ...s.qtyBtn,
+                  opacity: quantity >= maxCanAdd ? 0.4 : 1,
+                  cursor: quantity >= maxCanAdd ? 'not-allowed' : 'pointer',
+                }}
+                disabled={quantity >= maxCanAdd}
               >+</button>
             </div>
           </div>
@@ -191,20 +235,25 @@ export default function ProductDetail({ settings }) {
           <div style={s.actions}>
             <button
               onClick={handleAddToCart}
-              disabled={!product.in_stock}
+              disabled={isOutOfStock || maxCanAdd <= 0}
               style={{
                 ...s.addBtn,
                 background: added ? '#4caf50' : 'transparent',
                 borderColor: added ? '#4caf50' : brand,
                 color: added ? '#fff' : brand,
+                opacity: (isOutOfStock || maxCanAdd <= 0) ? 0.5 : 1,
               }}
             >
-              {added ? '✓ Added to Cart' : 'Add to Cart'}
+              {added ? '✓ Added to Cart' : maxCanAdd <= 0 ? 'Max in Cart' : 'Add to Cart'}
             </button>
             <button
               onClick={handleBuyNow}
-              disabled={!product.in_stock}
-              style={{ ...s.buyBtn, background: brand }}
+              disabled={isOutOfStock || maxCanAdd <= 0}
+              style={{
+                ...s.buyBtn,
+                background: brand,
+                opacity: (isOutOfStock || maxCanAdd <= 0) ? 0.5 : 1,
+              }}
             >
               Buy Now
             </button>
@@ -419,6 +468,19 @@ const s = {
     background: 'rgba(239, 83, 80, 0.1)',
     padding: '6px 14px',
     borderRadius: 20,
+  },
+  lowStock: {
+    fontSize: '0.8rem',
+    fontWeight: 600,
+    color: '#ff9800',
+    background: 'rgba(255, 152, 0, 0.1)',
+    padding: '6px 14px',
+    borderRadius: 20,
+  },
+  cartNote: {
+    fontSize: '0.75rem',
+    color: 'var(--kiosk-text-secondary)',
+    marginLeft: 10,
   },
   quantityWrap: {
     display: 'flex',

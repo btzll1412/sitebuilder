@@ -174,6 +174,10 @@ export async function checkout(data) {
   return requestWithBody('/api/checkout', data);
 }
 
+export async function checkStock(items) {
+  return requestWithBody('/api/stock/check', { items });
+}
+
 export async function getOrders() {
   return request('/api/orders');
 }

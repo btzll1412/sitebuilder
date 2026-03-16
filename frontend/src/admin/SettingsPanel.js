@@ -247,6 +247,13 @@ export default function SettingsPanel() {
               onChange={v => update('tax_rate', v)}
               type="number"
             />
+            <Field
+              label="Low Stock Threshold"
+              value={settings.low_stock_threshold || '5'}
+              onChange={v => update('low_stock_threshold', v)}
+              type="number"
+              placeholder="5"
+            />
             <SelectField
               label="Timezone"
               value={settings.timezone || 'America/New_York'}
