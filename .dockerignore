@@ -1,0 +1,15 @@
+data/
+uploads/
+node_modules/
+build/
+venv/
+__pycache__/
+.git/
+.gitignore
+.env
+*.pyc
+.vscode/
+.idea/
+docs/
+tests/
+*.md
