@@ -237,6 +237,8 @@ def _seed_data(cur: sqlite3.Cursor):
         "usaepay_sandbox": "1",
         "timezone": "America/New_York",
         "low_stock_threshold": "5",
+        "screen_timeout": "120",
+        "screen_timeout_warning": "30",
     }
     for k, v in defaults.items():
         cur.execute(
@@ -780,7 +782,7 @@ async def delete_page(page_id: int, admin_id: int = Depends(verify_token)):
 SAFE_SETTINGS = [
     "site_name", "logo_text", "tax_rate", "primary_color", "accent_color",
     "bg_color", "bg_image", "surface_color", "card_color", "text_color", "timezone",
-    "low_stock_threshold"
+    "low_stock_threshold", "screen_timeout", "screen_timeout_warning"
 ]
 ALL_SETTINGS = SAFE_SETTINGS + ["usaepay_key", "usaepay_pin", "usaepay_sandbox"]
 

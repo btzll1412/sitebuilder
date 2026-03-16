@@ -1,15 +1,34 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, Routes, Route } from 'react-router-dom';
 import Navbar from './Navbar';
 import CartDrawer from './CartDrawer';
 import PageRenderer from './PageRenderer';
 import ProductDetail from './ProductDetail';
+import IdleTimeout from './IdleTimeout';
 import * as api from '../api';
+
+// Polling interval for silent refresh (30 seconds)
+const POLL_INTERVAL = 30000;
 
 export default function KioskShell() {
   const [settings, setSettings] = useState({});
   const [pages, setPages] = useState([]);
 
+  // Silent refresh function - doesn't show loading states
+  const silentRefresh = useCallback(async () => {
+    try {
+      const [newSettings, newPages] = await Promise.all([
+        api.getSettings(),
+        api.getPages(),
+      ]);
+      setSettings(newSettings);
+      setPages(newPages);
+    } catch {
+      // Silent fail - don't disrupt the user
+    }
+  }, []);
+
+  // Initial load
   useEffect(() => {
     let cancelled = false;
     api.getSettings()
@@ -21,6 +40,12 @@ export default function KioskShell() {
     return () => { cancelled = true; };
   }, []);
 
+  // Silent polling every 30 seconds
+  useEffect(() => {
+    const interval = setInterval(silentRefresh, POLL_INTERVAL);
+    return () => clearInterval(interval);
+  }, [silentRefresh]);
+
   const bgStyle = settings.bg_image
     ? { minHeight: '100vh', background: `url(${settings.bg_image}) center/cover fixed` }
     : { minHeight: '100vh', background: settings.bg_color || 'var(--kiosk-bg)' };
@@ -29,21 +54,22 @@ export default function KioskShell() {
     <div style={bgStyle}>
       <Navbar settings={settings} pages={pages} />
       <Routes>
-        <Route path="/" element={<PageView slug="home" settings={settings} />} />
+        <Route path="/" element={<PageView slug="home" settings={settings} silentRefresh={silentRefresh} />} />
         <Route path="/product/:id" element={<ProductDetail settings={settings} />} />
-        <Route path="/:slug" element={<PageViewFromParams settings={settings} />} />
+        <Route path="/:slug" element={<PageViewFromParams settings={settings} silentRefresh={silentRefresh} />} />
       </Routes>
       <CartDrawer settings={settings} />
+      <IdleTimeout settings={settings} />
     </div>
   );
 }
 
-function PageViewFromParams({ settings }) {
+function PageViewFromParams({ settings, silentRefresh }) {
   const { slug } = useParams();
-  return <PageView slug={slug} settings={settings} />;
+  return <PageView slug={slug} settings={settings} silentRefresh={silentRefresh} />;
 }
 
-function PageView({ slug, settings }) {
+function PageView({ slug, settings, silentRefresh }) {
   const [page, setPage] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -55,6 +81,16 @@ function PageView({ slug, settings }) {
       .then(setPage)
       .catch(e => setError(e.message))
       .finally(() => setLoading(false));
+  }, [slug]);
+
+  // Silent refresh of page content every 30 seconds
+  useEffect(() => {
+    const interval = setInterval(() => {
+      api.getPage(slug)
+        .then(data => setPage(data))
+        .catch(() => {}); // Silent fail
+    }, POLL_INTERVAL);
+    return () => clearInterval(interval);
   }, [slug]);
 
   if (loading) {
