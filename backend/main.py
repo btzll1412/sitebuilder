@@ -3,12 +3,17 @@ Site Builder Platform — Backend API
 FastAPI application with SQLite, bcrypt auth, and USAePay integration.
 """
 
+import base64
+import io
 import json
 import os
 import secrets
+import shutil
 import sqlite3
 import time
 import uuid
+import zipfile
+from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
@@ -976,3 +981,188 @@ async def upload_file(
         raise
     except Exception:
         raise HTTPException(status_code=500, detail="Upload failed")
+
+
+# ─── Backup & Restore ────────────────────────────────────────────────────────
+
+
+@app.get("/api/backup/export")
+async def export_backup(admin_id: int = Depends(verify_token)):
+    """Export complete system backup as a ZIP file (base64 encoded)."""
+    try:
+        conn = get_db()
+        try:
+            backup_data = {
+                "version": "1.0",
+                "exported_at": datetime.utcnow().isoformat(),
+                "tables": {}
+            }
+
+            # Export products
+            products = conn.execute("SELECT * FROM products").fetchall()
+            backup_data["tables"]["products"] = [dict(r) for r in products]
+
+            # Export pages
+            pages = conn.execute("SELECT * FROM pages").fetchall()
+            backup_data["tables"]["pages"] = [dict(r) for r in pages]
+
+            # Export settings
+            settings = conn.execute("SELECT * FROM site_settings").fetchall()
+            backup_data["tables"]["site_settings"] = [dict(r) for r in settings]
+
+            # Export orders
+            orders = conn.execute("SELECT * FROM orders").fetchall()
+            backup_data["tables"]["orders"] = [dict(r) for r in orders]
+
+            # Note: We don't export admins/sessions for security
+            # The restore will keep existing admin credentials
+
+        finally:
+            conn.close()
+
+        # Create ZIP in memory
+        zip_buffer = io.BytesIO()
+        with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zf:
+            # Add database JSON
+            zf.writestr("database.json", json.dumps(backup_data, indent=2))
+
+            # Add uploaded files
+            if UPLOADS_DIR.exists():
+                for file_path in UPLOADS_DIR.iterdir():
+                    if file_path.is_file():
+                        zf.write(file_path, f"uploads/{file_path.name}")
+
+        zip_buffer.seek(0)
+        zip_base64 = base64.b64encode(zip_buffer.read()).decode('utf-8')
+
+        return {
+            "filename": f"backup_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.zip",
+            "data": zip_base64,
+            "size": len(zip_base64),
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Backup failed: {str(e)}")
+
+
+@app.post("/api/backup/import")
+async def import_backup(
+    file: UploadFile = File(...),
+    admin_id: int = Depends(verify_token)
+):
+    """Import system backup from a ZIP file."""
+    try:
+        # Read uploaded file
+        content = await file.read()
+
+        if not file.filename or not file.filename.endswith('.zip'):
+            raise HTTPException(status_code=400, detail="File must be a ZIP archive")
+
+        # Open ZIP
+        try:
+            zip_buffer = io.BytesIO(content)
+            with zipfile.ZipFile(zip_buffer, 'r') as zf:
+                # Check for database.json
+                if "database.json" not in zf.namelist():
+                    raise HTTPException(
+                        status_code=400,
+                        detail="Invalid backup: database.json not found"
+                    )
+
+                # Parse database JSON
+                db_json = zf.read("database.json").decode('utf-8')
+                backup_data = json.loads(db_json)
+
+                if "version" not in backup_data or "tables" not in backup_data:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="Invalid backup format"
+                    )
+
+                conn = get_db()
+                try:
+                    # Clear existing data (except admins/sessions)
+                    conn.execute("DELETE FROM products")
+                    conn.execute("DELETE FROM pages")
+                    conn.execute("DELETE FROM site_settings")
+                    conn.execute("DELETE FROM orders")
+
+                    # Restore products
+                    for p in backup_data["tables"].get("products", []):
+                        conn.execute(
+                            """INSERT INTO products
+                               (id, name, description, price, image, category, in_stock, sort_order, created_at)
+                               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                            (p.get("id"), p.get("name"), p.get("description", ""),
+                             p.get("price"), p.get("image", ""), p.get("category", "General"),
+                             p.get("in_stock", 1), p.get("sort_order", 0), p.get("created_at"))
+                        )
+
+                    # Restore pages
+                    for p in backup_data["tables"].get("pages", []):
+                        layout = p.get("layout", "[]")
+                        if isinstance(layout, list):
+                            layout = json.dumps(layout)
+                        conn.execute(
+                            """INSERT INTO pages
+                               (id, slug, title, layout, is_home, published, created_at)
+                               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                            (p.get("id"), p.get("slug"), p.get("title"),
+                             layout, p.get("is_home", 0), p.get("published", 1), p.get("created_at"))
+                        )
+
+                    # Restore settings
+                    for s in backup_data["tables"].get("site_settings", []):
+                        conn.execute(
+                            "INSERT OR REPLACE INTO site_settings (key, value) VALUES (?, ?)",
+                            (s.get("key"), s.get("value"))
+                        )
+
+                    # Restore orders
+                    for o in backup_data["tables"].get("orders", []):
+                        items = o.get("items", "[]")
+                        if isinstance(items, list):
+                            items = json.dumps(items)
+                        conn.execute(
+                            """INSERT INTO orders
+                               (id, items, subtotal, tax, total, payment_ref, status, created_at)
+                               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                            (o.get("id"), items, o.get("subtotal"),
+                             o.get("tax"), o.get("total"), o.get("payment_ref", ""),
+                             o.get("status", "pending"), o.get("created_at"))
+                        )
+
+                    conn.commit()
+                finally:
+                    conn.close()
+
+                # Clear existing uploads and restore from backup
+                if UPLOADS_DIR.exists():
+                    shutil.rmtree(UPLOADS_DIR)
+                UPLOADS_DIR.mkdir(exist_ok=True)
+
+                # Extract uploaded files
+                for name in zf.namelist():
+                    if name.startswith("uploads/") and not name.endswith("/"):
+                        file_name = name.replace("uploads/", "")
+                        file_content = zf.read(name)
+                        (UPLOADS_DIR / file_name).write_bytes(file_content)
+
+        except zipfile.BadZipFile:
+            raise HTTPException(status_code=400, detail="Invalid ZIP file")
+
+        return {
+            "ok": True,
+            "message": "Backup restored successfully",
+            "restored": {
+                "products": len(backup_data["tables"].get("products", [])),
+                "pages": len(backup_data["tables"].get("pages", [])),
+                "settings": len(backup_data["tables"].get("site_settings", [])),
+                "orders": len(backup_data["tables"].get("orders", [])),
+            }
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Restore failed: {str(e)}")

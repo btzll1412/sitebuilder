@@ -60,8 +60,10 @@ function RenderBlock({ block, settings }) {
   switch (type) {
     case 'hero': return <HeroBlock p={p} brand={brand} />;
     case 'product_grid': return <ProductGridBlock p={p} brand={brand} />;
+    case 'featured_products': return <FeaturedProductsBlock p={p} brand={brand} />;
     case 'category_shop': return <CategoryShopBlock p={p} brand={brand} />;
     case 'text': return <TextBlock p={p} />;
+    case 'buttons': return <ButtonsBlock p={p} brand={brand} />;
     case 'banner': return <BannerBlock p={p} />;
     case 'image': return <ImageBlock p={p} />;
     case 'spacer': return <div style={{ height: p.height || 60 }} />;
@@ -77,6 +79,15 @@ function RenderBlock({ block, settings }) {
 
 function HeroBlock({ p, brand }) {
   const navigate = useNavigate();
+
+  const handleClick = (link) => {
+    if (!link) return;
+    if (link.startsWith('http://') || link.startsWith('https://')) {
+      window.open(link, '_blank');
+    } else {
+      navigate(link);
+    }
+  };
 
   return (
     <section style={{
@@ -126,27 +137,50 @@ function HeroBlock({ p, brand }) {
         }}>
           {p.subtitle}
         </p>
-        {p.cta && (
-          <button
-            onClick={() => navigate('/shop')}
-            style={{
-              display: 'inline-block',
-              padding: '16px 44px',
-              background: brand,
-              color: '#fff',
-              fontFamily: 'var(--font-body)',
-              fontSize: '0.88rem',
-              fontWeight: 600,
-              letterSpacing: '0.06em',
-              textTransform: 'uppercase',
-              borderRadius: 'var(--radius-md)',
-              border: 'none',
-              cursor: 'pointer',
-              transition: 'transform 0.2s, box-shadow 0.2s',
-            }}>
-            {p.cta}
-          </button>
-        )}
+        <div style={{ display: 'flex', gap: 16, justifyContent: 'center', flexWrap: 'wrap' }}>
+          {p.cta && (
+            <button
+              onClick={() => handleClick(p.cta_link || '/shop')}
+              style={{
+                display: 'inline-block',
+                padding: '16px 44px',
+                background: brand,
+                color: '#fff',
+                fontFamily: 'var(--font-body)',
+                fontSize: '0.88rem',
+                fontWeight: 600,
+                letterSpacing: '0.06em',
+                textTransform: 'uppercase',
+                borderRadius: 'var(--radius-md)',
+                border: 'none',
+                cursor: 'pointer',
+                transition: 'transform 0.2s, box-shadow 0.2s',
+              }}>
+              {p.cta}
+            </button>
+          )}
+          {p.cta2 && (
+            <button
+              onClick={() => handleClick(p.cta2_link || '/')}
+              style={{
+                display: 'inline-block',
+                padding: '16px 44px',
+                background: 'transparent',
+                color: '#fff',
+                fontFamily: 'var(--font-body)',
+                fontSize: '0.88rem',
+                fontWeight: 600,
+                letterSpacing: '0.06em',
+                textTransform: 'uppercase',
+                borderRadius: 'var(--radius-md)',
+                border: '2px solid rgba(255,255,255,0.3)',
+                cursor: 'pointer',
+                transition: 'transform 0.2s, border-color 0.2s',
+              }}>
+              {p.cta2}
+            </button>
+          )}
+        </div>
       </div>
     </section>
   );
@@ -330,6 +364,77 @@ function ProductCard({ product, brand, onAdd, justAdded }) {
         </button>
       </div>
     </div>
+  );
+}
+
+// ─── Featured Products Block ──────────────────────────────────────────────
+
+function FeaturedProductsBlock({ p, brand }) {
+  const [products, setProducts] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [addedId, setAddedId] = useState(null);
+  const { addItem } = useCart();
+
+  useEffect(() => {
+    if (!p.product_ids || p.product_ids.length === 0) {
+      setLoading(false);
+      return;
+    }
+    // Fetch all products and filter by selected IDs
+    api.getProducts()
+      .then(allProducts => {
+        const selected = p.product_ids
+          .map(id => allProducts.find(prod => prod.id === id))
+          .filter(Boolean);
+        setProducts(selected);
+      })
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, [p.product_ids]);
+
+  const handleAdd = (product) => {
+    addItem({ id: product.id, name: product.name, price: product.price, image: product.image });
+    setAddedId(product.id);
+    setTimeout(() => setAddedId(null), 1500);
+  };
+
+  if (loading) {
+    return (
+      <section style={{ padding: '80px 40px', textAlign: 'center' }}>
+        <div style={{ width: 32, height: 32, border: '3px solid var(--kiosk-elevated)', borderTopColor: brand, borderRadius: '50%', animation: 'spin 0.8s linear infinite', margin: '0 auto' }} />
+      </section>
+    );
+  }
+
+  if (products.length === 0) {
+    return null;
+  }
+
+  return (
+    <section style={{ padding: '80px 40px', maxWidth: 1200, margin: '0 auto' }}>
+      {p.title && (
+        <h2 style={{
+          fontFamily: 'var(--font-display)',
+          fontSize: '2rem',
+          fontWeight: 400,
+          color: 'var(--kiosk-text)',
+          textAlign: 'center',
+          marginBottom: 48,
+          letterSpacing: '-0.01em',
+        }}>
+          {p.title}
+        </h2>
+      )}
+      <div style={{
+        display: 'grid',
+        gridTemplateColumns: `repeat(${p.columns || 3}, 1fr)`,
+        gap: 24,
+      }}>
+        {products.map(product => (
+          <ProductCard key={product.id} product={product} brand={brand} onAdd={() => handleAdd(product)} justAdded={addedId === product.id} />
+        ))}
+      </div>
+    </section>
   );
 }
 
@@ -542,6 +647,66 @@ function TextBlock({ p }) {
           {p.body}
         </p>
       )}
+    </section>
+  );
+}
+
+// ─── Buttons Block ─────────────────────────────────────────────────────────
+
+function ButtonsBlock({ p, brand }) {
+  const navigate = useNavigate();
+
+  const handleClick = (link) => {
+    if (!link) return;
+    if (link.startsWith('http://') || link.startsWith('https://')) {
+      window.open(link, '_blank');
+    } else {
+      navigate(link);
+    }
+  };
+
+  const getButtonStyle = (style) => {
+    const base = {
+      display: 'inline-block',
+      padding: '16px 44px',
+      fontFamily: 'var(--font-body)',
+      fontSize: '0.88rem',
+      fontWeight: 600,
+      letterSpacing: '0.06em',
+      textTransform: 'uppercase',
+      borderRadius: 'var(--radius-md)',
+      cursor: 'pointer',
+      transition: 'transform 0.2s, box-shadow 0.2s',
+      minHeight: 52,
+    };
+    switch (style) {
+      case 'secondary':
+        return { ...base, background: 'var(--kiosk-elevated)', color: 'var(--kiosk-text)', border: 'none' };
+      case 'outline':
+        return { ...base, background: 'transparent', color: 'var(--kiosk-text)', border: '2px solid rgba(255,255,255,0.3)' };
+      default: // primary
+        return { ...base, background: brand, color: '#fff', border: 'none' };
+    }
+  };
+
+  return (
+    <section style={{
+      padding: '40px',
+      background: p.bg_color || 'transparent',
+      display: 'flex',
+      justifyContent: p.align === 'left' ? 'flex-start' : p.align === 'right' ? 'flex-end' : 'center',
+      gap: 16,
+      flexWrap: 'wrap',
+    }}>
+      {(p.buttons || []).map((btn, i) => (
+        <button
+          key={i}
+          onClick={() => handleClick(btn.link)}
+          style={getButtonStyle(btn.style)}
+        >
+          {btn.text}
+        </button>
+      ))}
     </section>
   );
 }

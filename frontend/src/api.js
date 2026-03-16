@@ -204,3 +204,29 @@ export async function uploadFile(file) {
 export async function healthCheck() {
   return request('/api/health');
 }
+
+// ─── Backup & Restore ───────────────────────────────────────────────────────
+
+export async function exportBackup() {
+  return request('/api/backup/export');
+}
+
+export async function importBackup(file) {
+  const formData = new FormData();
+  formData.append('file', file);
+  const resp = await fetch(`${BASE}/api/backup/import`, {
+    method: 'POST',
+    headers: authHeaders(),
+    body: formData,
+  });
+  if (resp.status === 401) {
+    localStorage.removeItem('admin_token');
+    window.location.href = '/admin';
+    throw new Error('Session expired');
+  }
+  if (!resp.ok) {
+    const data = await resp.json().catch(() => ({}));
+    throw new Error(data.detail || 'Restore failed');
+  }
+  return resp.json();
+}
