@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useCart } from '../CartContext';
 
@@ -9,104 +9,123 @@ export default function IdleTimeout({ settings }) {
   const location = useLocation();
   const { clearCart, closeCart } = useCart();
 
+  // Use refs for timers
   const idleTimerRef = useRef(null);
   const warningTimerRef = useRef(null);
   const countdownRef = useRef(null);
+  const showWarningRef = useRef(showWarning);
+
+  // Keep ref in sync with state
+  useEffect(() => {
+    showWarningRef.current = showWarning;
+  }, [showWarning]);
 
   // Get settings with defaults
-  const screenTimeout = parseInt(settings?.screen_timeout || '120') * 1000; // Convert to ms
+  const screenTimeout = parseInt(settings?.screen_timeout || '120') * 1000;
   const warningDuration = parseInt(settings?.screen_timeout_warning || '30');
   const brand = settings?.primary_color || '#C2185B';
 
   // Don't run on admin pages
   const isAdminPage = location.pathname.startsWith('/admin');
 
-  const resetTimers = useCallback(() => {
-    // Clear existing timers
-    if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
-    if (warningTimerRef.current) clearTimeout(warningTimerRef.current);
-    if (countdownRef.current) clearInterval(countdownRef.current);
-
-    // Hide warning if showing
-    if (showWarning) {
-      setShowWarning(false);
-    }
-
-    // Don't set timers on admin pages or if timeout is 0 (disabled)
+  useEffect(() => {
+    // Skip on admin pages or if disabled
     if (isAdminPage || screenTimeout <= 0) return;
 
-    // Set idle timer
-    idleTimerRef.current = setTimeout(() => {
-      setShowWarning(true);
-      setCountdown(warningDuration);
+    // Clear all timers helper
+    const clearTimers = () => {
+      if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
+      if (warningTimerRef.current) clearTimeout(warningTimerRef.current);
+      if (countdownRef.current) clearInterval(countdownRef.current);
+    };
 
-      // Start countdown
-      countdownRef.current = setInterval(() => {
-        setCountdown(prev => {
-          if (prev <= 1) {
+    // Start idle timer
+    const startTimer = () => {
+      clearTimers();
+
+      idleTimerRef.current = setTimeout(() => {
+        // Show warning modal
+        setShowWarning(true);
+        setCountdown(warningDuration);
+
+        // Start countdown
+        let count = warningDuration;
+        countdownRef.current = setInterval(() => {
+          count -= 1;
+          setCountdown(count);
+          if (count <= 0) {
             clearInterval(countdownRef.current);
-            return 0;
           }
-          return prev - 1;
-        });
-      }, 1000);
+        }, 1000);
 
-      // Set auto-redirect timer
-      warningTimerRef.current = setTimeout(() => {
-        handleTimeout();
-      }, warningDuration * 1000);
-    }, screenTimeout);
-  }, [screenTimeout, warningDuration, isAdminPage, showWarning]);
+        // Auto-redirect after warning
+        warningTimerRef.current = setTimeout(() => {
+          clearTimers();
+          clearCart();
+          closeCart();
+          setShowWarning(false);
+          navigate('/');
+        }, warningDuration * 1000);
+      }, screenTimeout);
+    };
 
-  const handleTimeout = useCallback(() => {
+    // Handle user activity
+    const handleActivity = () => {
+      // Only reset if warning is NOT showing
+      if (!showWarningRef.current) {
+        startTimer();
+      }
+    };
+
+    // Add event listeners
+    const events = ['mousedown', 'mousemove', 'keydown', 'touchstart', 'scroll'];
+    events.forEach(e => document.addEventListener(e, handleActivity, { passive: true }));
+
+    // Start initial timer
+    startTimer();
+
+    // Cleanup
+    return () => {
+      events.forEach(e => document.removeEventListener(e, handleActivity));
+      clearTimers();
+    };
+  }, [isAdminPage, screenTimeout, warningDuration, clearCart, closeCart, navigate]);
+
+  // Handle "I'm Still Here" click
+  const handleStillHere = () => {
     // Clear timers
     if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
     if (warningTimerRef.current) clearTimeout(warningTimerRef.current);
     if (countdownRef.current) clearInterval(countdownRef.current);
 
-    // Clear cart and close drawer
-    clearCart();
-    closeCart();
-
-    // Navigate to home
     setShowWarning(false);
-    navigate('/');
-  }, [clearCart, closeCart, navigate]);
 
-  const handleStillHere = useCallback(() => {
-    resetTimers();
-  }, [resetTimers]);
+    // Restart idle timer after a brief delay
+    setTimeout(() => {
+      if (!isAdminPage && screenTimeout > 0) {
+        idleTimerRef.current = setTimeout(() => {
+          setShowWarning(true);
+          setCountdown(warningDuration);
 
-  // Set up activity listeners
-  useEffect(() => {
-    if (isAdminPage) return;
+          let count = warningDuration;
+          countdownRef.current = setInterval(() => {
+            count -= 1;
+            setCountdown(count);
+            if (count <= 0) clearInterval(countdownRef.current);
+          }, 1000);
 
-    const events = ['mousedown', 'mousemove', 'keydown', 'touchstart', 'scroll'];
-
-    const handleActivity = () => {
-      if (!showWarning) {
-        resetTimers();
+          warningTimerRef.current = setTimeout(() => {
+            clearCart();
+            closeCart();
+            setShowWarning(false);
+            navigate('/');
+          }, warningDuration * 1000);
+        }, screenTimeout);
       }
-    };
+    }, 100);
+  };
 
-    events.forEach(event => {
-      document.addEventListener(event, handleActivity, { passive: true });
-    });
-
-    // Initial timer
-    resetTimers();
-
-    return () => {
-      events.forEach(event => {
-        document.removeEventListener(event, handleActivity);
-      });
-      if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
-      if (warningTimerRef.current) clearTimeout(warningTimerRef.current);
-      if (countdownRef.current) clearInterval(countdownRef.current);
-    };
-  }, [isAdminPage, resetTimers, showWarning]);
-
-  // Don't render anything on admin pages
+  // Don't render on admin or when not showing
   if (isAdminPage || !showWarning) return null;
 
   return (
@@ -114,9 +133,7 @@ export default function IdleTimeout({ settings }) {
       <div style={s.modal} onClick={e => e.stopPropagation()}>
         <div style={{ ...s.icon, background: `${brand}20`, color: brand }}>?</div>
         <h2 style={s.title}>Still there?</h2>
-        <p style={s.text}>
-          Tap anywhere to continue shopping
-        </p>
+        <p style={s.text}>Tap anywhere to continue shopping</p>
         <div style={s.countdown}>
           <div
             style={{
@@ -126,13 +143,8 @@ export default function IdleTimeout({ settings }) {
             }}
           />
         </div>
-        <p style={s.countdownText}>
-          Returning to home in {countdown} seconds
-        </p>
-        <button
-          onClick={handleStillHere}
-          style={{ ...s.button, background: brand }}
-        >
+        <p style={s.countdownText}>Returning to home in {countdown} seconds</p>
+        <button onClick={handleStillHere} style={{ ...s.button, background: brand }}>
           I'm Still Here
         </button>
       </div>
@@ -149,7 +161,6 @@ const s = {
     alignItems: 'center',
     justifyContent: 'center',
     zIndex: 9999,
-    animation: 'fadeIn 0.3s ease',
   },
   modal: {
     background: 'var(--kiosk-surface, #141414)',
@@ -172,7 +183,7 @@ const s = {
     margin: '0 auto 24px',
   },
   title: {
-    fontFamily: 'var(--font-display, "Cormorant Garamond", serif)',
+    fontFamily: 'var(--font-display)',
     fontSize: '2rem',
     fontWeight: 500,
     color: 'var(--kiosk-text, #f5f0eb)',
