@@ -46,8 +46,7 @@ const styles = {
     position: 'sticky',
     top: 0,
     zIndex: 100,
-    background: 'rgba(13, 13, 13, 0.85)',
-    backdropFilter: 'blur(20px)',
+    background: 'var(--kiosk-surface)',
     borderBottom: '1px solid var(--kiosk-border)',
   },
   inner: {
