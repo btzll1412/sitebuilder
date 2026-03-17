@@ -18,7 +18,34 @@ export default function CartDrawer({ settings }) {
   const [result, setResult] = useState(null);
   const [errors, setErrors] = useState({});
   const [stockError, setStockError] = useState(null);
+  const [stockInfo, setStockInfo] = useState({}); // { cartKey: availableStock }
   const toast = useToast();
+
+  // Fetch stock info when cart opens or items change
+  useEffect(() => {
+    if (!isOpen || items.length === 0) {
+      setStockInfo({});
+      return;
+    }
+
+    const fetchStockInfo = async () => {
+      try {
+        const stockResult = await api.checkStock(
+          items.map(i => ({ id: i.id, name: i.name, qty: i.qty, variant: i.variant || null }))
+        );
+        const info = {};
+        stockResult.items.forEach(item => {
+          const key = item.variant ? `${item.id}_${item.variant}` : `${item.id}`;
+          info[key] = item.available;
+        });
+        setStockInfo(info);
+      } catch {
+        // Silent fail - stock validation will happen at checkout
+      }
+    };
+
+    fetchStockInfo();
+  }, [isOpen, items]);
 
   const taxRate = parseFloat(settings?.tax_rate || '8.25');
   const tax = Math.round(subtotal * taxRate) / 100;
@@ -206,8 +233,20 @@ export default function CartDrawer({ settings }) {
                         >−</button>
                         <span style={s.qtyValue}>{item.qty}</span>
                         <button
-                          onClick={() => updateQty(item.cartKey, item.qty + 1)}
-                          style={s.qtyBtn}
+                          onClick={() => {
+                            const maxStock = stockInfo[item.cartKey];
+                            if (maxStock === undefined || item.qty < maxStock) {
+                              updateQty(item.cartKey, item.qty + 1);
+                            }
+                          }}
+                          style={{
+                            ...s.qtyBtn,
+                            ...(stockInfo[item.cartKey] !== undefined && item.qty >= stockInfo[item.cartKey]
+                              ? { opacity: 0.4, cursor: 'not-allowed' }
+                              : {}
+                            ),
+                          }}
+                          disabled={stockInfo[item.cartKey] !== undefined && item.qty >= stockInfo[item.cartKey]}
                           aria-label="Increase quantity"
                         >+</button>
                       </div>

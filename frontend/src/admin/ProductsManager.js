@@ -2,6 +2,14 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useToast } from '../components/Toast';
 import * as api from '../api';
 
+// Helper to calculate total stock (variants or main stock)
+function getProductStock(product) {
+  if (product.variants && product.variants.length > 0) {
+    return product.variants.reduce((sum, v) => sum + (v.stock_qty || 0), 0);
+  }
+  return product.stock_qty || 0;
+}
+
 export default function ProductsManager() {
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -224,12 +232,19 @@ export default function ProductsManager() {
                 ${product.price.toFixed(2)}
               </div>
               <div style={{ width: 80, textAlign: 'center' }}>
-                <span style={{
-                  ...styles.stockBadge,
-                  ...(product.stock_qty > 0 ? styles.stockIn : styles.stockOut),
-                }}>
-                  {product.stock_qty > 0 ? product.stock_qty : 'Out'}
-                </span>
+                {(() => {
+                  const totalStock = getProductStock(product);
+                  const hasVariants = product.variants && product.variants.length > 0;
+                  return (
+                    <span style={{
+                      ...styles.stockBadge,
+                      ...(totalStock > 0 ? styles.stockIn : styles.stockOut),
+                    }}>
+                      {totalStock > 0 ? totalStock : 'Out'}
+                      {hasVariants && totalStock > 0 && <span style={{ opacity: 0.7 }}> ✦</span>}
+                    </span>
+                  );
+                })()}
               </div>
               <div style={{ width: 140, display: 'flex', gap: 4, justifyContent: 'flex-end' }}>
                 <button

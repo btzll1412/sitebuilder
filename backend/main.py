@@ -399,6 +399,26 @@ async def change_password(request: Request, admin_id: int = Depends(verify_token
 # ─── Products Routes ────────────────────────────────────────────────────────
 
 
+def _has_stock(product_row) -> bool:
+    """Check if a product has any stock (either main stock or variant stock)."""
+    variants = json.loads(product_row["variants"] or "[]")
+    if variants:
+        # Product has variants - check if ANY variant has stock
+        return any(v.get("stock_qty", 0) > 0 for v in variants)
+    else:
+        # No variants - check main stock_qty
+        return product_row["stock_qty"] > 0
+
+
+def _get_total_stock(product_row) -> int:
+    """Get total available stock for a product (sum of variants or main stock)."""
+    variants = json.loads(product_row["variants"] or "[]")
+    if variants:
+        return sum(v.get("stock_qty", 0) for v in variants)
+    else:
+        return product_row["stock_qty"]
+
+
 @app.get("/api/products")
 async def get_products(category: Optional[str] = None):
     try:
@@ -410,20 +430,24 @@ async def get_products(category: Optional[str] = None):
             ).fetchone()
             low_stock_threshold = int(threshold_row["value"]) if threshold_row else 5
 
+            # Get all products (including out of stock - frontend will show "Out of Stock")
             if category and category != "all":
                 rows = conn.execute(
-                    "SELECT * FROM products WHERE stock_qty > 0 AND category = ? ORDER BY sort_order",
+                    "SELECT * FROM products WHERE category = ? ORDER BY sort_order",
                     (category,),
                 ).fetchall()
             else:
                 rows = conn.execute(
-                    "SELECT * FROM products WHERE stock_qty > 0 ORDER BY sort_order"
+                    "SELECT * FROM products ORDER BY sort_order"
                 ).fetchall()
+
             results = []
             for r in rows:
                 d = dict(r)
                 d["variants"] = json.loads(d.get("variants") or "[]")
                 d["low_stock_threshold"] = low_stock_threshold
+                # Add total_stock field for frontend convenience
+                d["total_stock"] = _get_total_stock(r)
                 results.append(d)
             return results
         finally:
@@ -457,8 +481,9 @@ async def get_categories():
     try:
         conn = get_db()
         try:
+            # Get all categories (including those with only out-of-stock products)
             rows = conn.execute(
-                "SELECT DISTINCT category FROM products WHERE stock_qty > 0 ORDER BY category"
+                "SELECT DISTINCT category FROM products ORDER BY category"
             ).fetchall()
             return [r["category"] for r in rows]
         finally:

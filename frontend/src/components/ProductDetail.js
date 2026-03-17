@@ -12,7 +12,21 @@ export default function ProductDetail({ settings }) {
   const [quantity, setQuantity] = useState(1);
   const [selectedVariant, setSelectedVariant] = useState(null);
   const [displayImage, setDisplayImage] = useState('');
+  const [searchText, setSearchText] = useState('');
+  const [dropdownOpen, setDropdownOpen] = useState(false);
+  const dropdownRef = React.useRef(null);
   const { addItem, openCart, items: cartItems } = useCart();
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target)) {
+        setDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   const brand = settings?.primary_color || '#C2185B';
   const lowStockThreshold = product?.low_stock_threshold || 5;
@@ -179,6 +193,78 @@ export default function ProductDetail({ settings }) {
               <h3 style={s.variantTitle}>
                 Color: <span style={{ color: 'var(--kiosk-text)', fontWeight: 500 }}>{selectedVariant?.name || ''}</span>
               </h3>
+
+              {/* Searchable Dropdown */}
+              <div style={s.searchDropdownWrap} ref={dropdownRef}>
+                <div style={s.searchInputWrap}>
+                  <span style={s.searchIcon}>🔍</span>
+                  <input
+                    type="text"
+                    value={searchText}
+                    onChange={(e) => {
+                      setSearchText(e.target.value);
+                      setDropdownOpen(true);
+                    }}
+                    onFocus={() => setDropdownOpen(true)}
+                    placeholder="Search colors..."
+                    style={s.searchInput}
+                  />
+                  <button
+                    onClick={() => setDropdownOpen(!dropdownOpen)}
+                    style={s.dropdownToggle}
+                  >
+                    {dropdownOpen ? '▲' : '▼'}
+                  </button>
+                </div>
+
+                {dropdownOpen && (
+                  <div style={s.dropdownList}>
+                    {product.variants
+                      .filter(v => v.name.toLowerCase().includes(searchText.toLowerCase()))
+                      .map((v, idx) => {
+                        const isSelected = selectedVariant?.name === v.name;
+                        const variantOutOfStock = (v.stock_qty || 0) <= 0;
+                        return (
+                          <button
+                            key={idx}
+                            onClick={() => {
+                              if (!variantOutOfStock) {
+                                handleVariantSelect(v);
+                                setSearchText('');
+                                setDropdownOpen(false);
+                              }
+                            }}
+                            disabled={variantOutOfStock}
+                            style={{
+                              ...s.dropdownItem,
+                              background: isSelected ? `${brand}20` : 'transparent',
+                              opacity: variantOutOfStock ? 0.5 : 1,
+                              cursor: variantOutOfStock ? 'not-allowed' : 'pointer',
+                            }}
+                          >
+                            <span
+                              style={{
+                                ...s.dropdownSwatch,
+                                background: v.color_code || '#888',
+                              }}
+                            />
+                            <span style={s.dropdownName}>{v.name}</span>
+                            {variantOutOfStock ? (
+                              <span style={s.dropdownStock}>Out of Stock</span>
+                            ) : (
+                              <span style={s.dropdownStockAvail}>{v.stock_qty} available</span>
+                            )}
+                          </button>
+                        );
+                      })}
+                    {product.variants.filter(v => v.name.toLowerCase().includes(searchText.toLowerCase())).length === 0 && (
+                      <div style={s.dropdownEmpty}>No colors match "{searchText}"</div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Color Swatches */}
               <div style={s.variantOptions}>
                 {product.variants.map((v, idx) => {
                   const isSelected = selectedVariant?.name === v.name;
@@ -431,6 +517,93 @@ const s = {
     letterSpacing: '0.08em',
     color: 'var(--kiosk-text-secondary)',
     marginBottom: 12,
+  },
+  searchDropdownWrap: {
+    position: 'relative',
+    marginBottom: 16,
+  },
+  searchInputWrap: {
+    display: 'flex',
+    alignItems: 'center',
+    background: 'var(--kiosk-card)',
+    border: '1px solid var(--kiosk-border)',
+    borderRadius: 'var(--radius-md)',
+    overflow: 'hidden',
+  },
+  searchIcon: {
+    padding: '0 12px',
+    fontSize: '1rem',
+    color: 'var(--kiosk-text-secondary)',
+  },
+  searchInput: {
+    flex: 1,
+    padding: '14px 0',
+    fontSize: '0.95rem',
+    background: 'transparent',
+    border: 'none',
+    color: 'var(--kiosk-text)',
+    outline: 'none',
+  },
+  dropdownToggle: {
+    padding: '14px 16px',
+    background: 'transparent',
+    border: 'none',
+    color: 'var(--kiosk-text-secondary)',
+    cursor: 'pointer',
+    fontSize: '0.8rem',
+  },
+  dropdownList: {
+    position: 'absolute',
+    top: '100%',
+    left: 0,
+    right: 0,
+    marginTop: 4,
+    background: 'var(--kiosk-card)',
+    border: '1px solid var(--kiosk-border)',
+    borderRadius: 'var(--radius-md)',
+    maxHeight: 280,
+    overflowY: 'auto',
+    zIndex: 100,
+    boxShadow: '0 8px 24px rgba(0,0,0,0.3)',
+  },
+  dropdownItem: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 12,
+    width: '100%',
+    padding: '12px 16px',
+    border: 'none',
+    borderBottom: '1px solid var(--kiosk-border)',
+    textAlign: 'left',
+    transition: 'background 0.15s',
+  },
+  dropdownSwatch: {
+    width: 28,
+    height: 28,
+    borderRadius: '50%',
+    flexShrink: 0,
+    border: '2px solid var(--kiosk-border)',
+  },
+  dropdownName: {
+    flex: 1,
+    fontSize: '0.9rem',
+    fontWeight: 500,
+    color: 'var(--kiosk-text)',
+  },
+  dropdownStock: {
+    fontSize: '0.75rem',
+    color: '#ef5350',
+    fontWeight: 500,
+  },
+  dropdownStockAvail: {
+    fontSize: '0.75rem',
+    color: 'var(--kiosk-text-secondary)',
+  },
+  dropdownEmpty: {
+    padding: '16px',
+    textAlign: 'center',
+    color: 'var(--kiosk-text-secondary)',
+    fontSize: '0.9rem',
   },
   variantOptions: {
     display: 'flex',
