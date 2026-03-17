@@ -2,6 +2,14 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useToast } from '../components/Toast';
 import * as api from '../api';
 
+// Helper to calculate total stock (variants or main stock)
+function getProductStock(product) {
+  if (product.variants && product.variants.length > 0) {
+    return product.variants.reduce((sum, v) => sum + (v.stock_qty || 0), 0);
+  }
+  return product.stock_qty || 0;
+}
+
 export default function ProductsManager() {
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -224,12 +232,19 @@ export default function ProductsManager() {
                 ${product.price.toFixed(2)}
               </div>
               <div style={{ width: 80, textAlign: 'center' }}>
-                <span style={{
-                  ...styles.stockBadge,
-                  ...(product.in_stock ? styles.stockIn : styles.stockOut),
-                }}>
-                  {product.in_stock ? 'In Stock' : 'Out'}
-                </span>
+                {(() => {
+                  const totalStock = getProductStock(product);
+                  const hasVariants = product.variants && product.variants.length > 0;
+                  return (
+                    <span style={{
+                      ...styles.stockBadge,
+                      ...(totalStock > 0 ? styles.stockIn : styles.stockOut),
+                    }}>
+                      {totalStock > 0 ? totalStock : 'Out'}
+                      {hasVariants && totalStock > 0 && <span style={{ opacity: 0.7 }}> ✦</span>}
+                    </span>
+                  );
+                })()}
               </div>
               <div style={{ width: 140, display: 'flex', gap: 4, justifyContent: 'flex-end' }}>
                 <button
@@ -270,14 +285,38 @@ function ProductForm({ product, categories, onSave, onCancel }) {
   const [description, setDescription] = useState(product?.description || '');
   const [price, setPrice] = useState(product?.price?.toString() || '');
   const [category, setCategory] = useState(product?.category || '');
-  const [inStock, setInStock] = useState(product?.in_stock ?? 1);
+  const [stockQty, setStockQty] = useState(product?.stock_qty?.toString() || '0');
   const [sortOrder, setSortOrder] = useState(product?.sort_order?.toString() || '0');
+  const [variants, setVariants] = useState(product?.variants || []);
   const [imageFile, setImageFile] = useState(null);
   const [imagePreview, setImagePreview] = useState(product?.image || '');
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState({});
   const fileRef = useRef(null);
   const toast = useToast();
+
+  const addVariant = () => {
+    setVariants([...variants, { name: '', color_code: '#C2185B', image: '', stock_qty: 10 }]);
+  };
+
+  const updateVariant = (index, field, value) => {
+    const newVariants = [...variants];
+    newVariants[index] = { ...newVariants[index], [field]: value };
+    setVariants(newVariants);
+  };
+
+  const removeVariant = (index) => {
+    setVariants(variants.filter((_, i) => i !== index));
+  };
+
+  const handleVariantImageUpload = async (index, file) => {
+    try {
+      const result = await api.uploadFile(file);
+      updateVariant(index, 'image', result.url);
+    } catch (err) {
+      toast.error('Failed to upload image');
+    }
+  };
 
   const validate = () => {
     const e = {};
@@ -326,8 +365,9 @@ function ProductForm({ product, categories, onSave, onCancel }) {
       fd.append('description', description);
       fd.append('price', parseFloat(price));
       fd.append('category', category || 'General');
-      fd.append('in_stock', inStock);
+      fd.append('stock_qty', parseInt(stockQty) || 0);
       fd.append('sort_order', parseInt(sortOrder) || 0);
+      fd.append('variants', JSON.stringify(variants));
       if (imageFile) fd.append('image', imageFile);
 
       if (product) {
@@ -416,6 +456,88 @@ function ProductForm({ product, categories, onSave, onCancel }) {
           </div>
 
           <div style={formStyles.field}>
+            <label style={formStyles.label}>Colors / Variants</label>
+            {variants.length > 0 && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginBottom: 12 }}>
+                {variants.map((v, idx) => (
+                  <div key={idx} style={{
+                    padding: 14, background: 'var(--admin-surface)',
+                    borderRadius: 'var(--radius-md)', border: '1px solid var(--admin-border)',
+                  }}>
+                    <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 10 }}>
+                      <input
+                        type="color"
+                        value={v.color_code || '#C2185B'}
+                        onChange={e => updateVariant(idx, 'color_code', e.target.value)}
+                        style={{ width: 40, height: 36, border: 'none', cursor: 'pointer', borderRadius: 4, padding: 0 }}
+                        title="Color swatch"
+                      />
+                      <input
+                        value={v.name || ''}
+                        onChange={e => updateVariant(idx, 'name', e.target.value)}
+                        style={{ ...formStyles.input, flex: 1 }}
+                        placeholder="Color name (e.g. Red)"
+                      />
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <label style={{ fontSize: '0.75rem', color: 'var(--admin-text-hint)', whiteSpace: 'nowrap' }}>Stock:</label>
+                        <input
+                          type="number"
+                          min="0"
+                          value={v.stock_qty ?? 0}
+                          onChange={e => updateVariant(idx, 'stock_qty', parseInt(e.target.value) || 0)}
+                          style={{ ...formStyles.input, width: 70, padding: '8px 10px', textAlign: 'center' }}
+                        />
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => removeVariant(idx)}
+                        style={{ width: 32, height: 32, color: '#e57373', fontSize: '1rem', background: 'transparent', borderRadius: 'var(--radius-sm)' }}
+                      >✕</button>
+                    </div>
+                    <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+                      <input
+                        value={v.image || ''}
+                        onChange={e => updateVariant(idx, 'image', e.target.value)}
+                        style={{ ...formStyles.input, flex: 1, fontSize: '0.82rem' }}
+                        placeholder="Image URL for this color (optional)"
+                      />
+                      <label style={{
+                        padding: '8px 14px', fontSize: '0.78rem', fontWeight: 500,
+                        color: 'var(--brand)', background: 'var(--brand-light)',
+                        borderRadius: 'var(--radius-sm)', cursor: 'pointer',
+                      }}>
+                        Upload
+                        <input
+                          type="file"
+                          accept="image/*"
+                          onChange={e => {
+                            const file = e.target.files?.[0];
+                            if (file) handleVariantImageUpload(idx, file);
+                          }}
+                          style={{ display: 'none' }}
+                        />
+                      </label>
+                      {v.image && (
+                        <img src={v.image} alt="" style={{ width: 36, height: 36, objectFit: 'cover', borderRadius: 4 }} />
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+            <button
+              type="button"
+              onClick={addVariant}
+              style={{ padding: '10px 18px', fontSize: '0.85rem', fontWeight: 500, color: 'var(--brand)', background: 'var(--brand-light)', border: '1px dashed var(--brand)', borderRadius: 'var(--radius-md)', width: '100%' }}
+            >
+              + Add Color Variant
+            </button>
+            <p style={{ fontSize: '0.75rem', color: 'var(--admin-text-hint)', marginTop: 8 }}>
+              Each variant has its own color swatch, image, and stock quantity. Leave empty if product has no variants.
+            </p>
+          </div>
+
+          <div style={formStyles.field}>
             <label style={formStyles.label}>Image</label>
             <div
               style={formStyles.dropZone}
@@ -444,25 +566,21 @@ function ProductForm({ product, categories, onSave, onCancel }) {
             </div>
           </div>
 
-          <div style={formStyles.field}>
-            <label style={formStyles.toggleLabel}>
+          <div style={formStyles.row}>
+            <div style={formStyles.field}>
+              <label style={formStyles.label}>Stock Quantity</label>
               <input
-                type="checkbox"
-                checked={!!inStock}
-                onChange={e => setInStock(e.target.checked ? 1 : 0)}
-                style={formStyles.checkbox}
+                type="number"
+                min="0"
+                value={stockQty}
+                onChange={e => setStockQty(e.target.value)}
+                style={formStyles.input}
+                placeholder="0"
               />
-              <span style={{
-                ...formStyles.toggle,
-                background: inStock ? 'var(--brand)' : 'var(--admin-border)',
-              }}>
-                <span style={{
-                  ...formStyles.toggleDot,
-                  transform: inStock ? 'translateX(18px)' : 'translateX(2px)',
-                }} />
-              </span>
-              In Stock
-            </label>
+              <p style={{ fontSize: '0.75rem', color: 'var(--admin-text-hint)', marginTop: 4 }}>
+                {variants.length > 0 ? 'For products with variants, set stock per variant above' : 'Enter 0 if out of stock'}
+              </p>
+            </div>
           </div>
 
           <div style={formStyles.actions}>

@@ -247,6 +247,13 @@ export default function SettingsPanel() {
               onChange={v => update('tax_rate', v)}
               type="number"
             />
+            <Field
+              label="Low Stock Threshold"
+              value={settings.low_stock_threshold || '5'}
+              onChange={v => update('low_stock_threshold', v)}
+              type="number"
+              placeholder="5"
+            />
             <SelectField
               label="Timezone"
               value={settings.timezone || 'America/New_York'}
@@ -254,6 +261,33 @@ export default function SettingsPanel() {
               options={TIMEZONES}
             />
           </div>
+        </section>
+
+        {/* Kiosk Settings */}
+        <section style={s.section}>
+          <h3 style={s.sectionTitle}>Kiosk Settings</h3>
+          <p style={s.sectionDesc}>
+            Configure idle timeout for kiosk mode. Set to 0 to disable.
+          </p>
+          <div style={s.grid}>
+            <Field
+              label="Screen Timeout (seconds)"
+              value={settings.screen_timeout || '120'}
+              onChange={v => update('screen_timeout', v)}
+              type="number"
+              placeholder="120"
+            />
+            <Field
+              label="Warning Duration (seconds)"
+              value={settings.screen_timeout_warning || '30'}
+              onChange={v => update('screen_timeout_warning', v)}
+              type="number"
+              placeholder="30"
+            />
+          </div>
+          <p style={{ fontSize: '0.75rem', color: 'var(--admin-text-hint)', marginTop: 8 }}>
+            After the timeout, a "Still here?" message appears for the warning duration. If no response, cart is cleared and kiosk returns to home.
+          </p>
         </section>
 
         {/* Payment */}

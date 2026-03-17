@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { useCart } from '../CartContext';
 import * as api from '../api';
@@ -10,30 +10,122 @@ export default function ProductDetail({ settings }) {
   const [error, setError] = useState(null);
   const [added, setAdded] = useState(false);
   const [quantity, setQuantity] = useState(1);
-  const { addItem, openCart } = useCart();
+  const [selectedVariant, setSelectedVariant] = useState(null);
+  const [displayImage, setDisplayImage] = useState('');
+  const [searchText, setSearchText] = useState('');
+  const [dropdownOpen, setDropdownOpen] = useState(false);
+  const dropdownRef = React.useRef(null);
+  const { addItem, openCart, items: cartItems } = useCart();
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target)) {
+        setDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   const brand = settings?.primary_color || '#C2185B';
+  const lowStockThreshold = product?.low_stock_threshold || 5;
+
+  // Calculate stock values with explicit dependencies using useMemo
+  const stockInfo = useMemo(() => {
+    if (!product) {
+      return { availableStock: 0, cartQty: 0, maxCanAdd: 0, isLowStock: false, isOutOfStock: true };
+    }
+
+    // Get available stock
+    const hasVariants = product.variants && product.variants.length > 0;
+    let availableStock = 0;
+    if (hasVariants && selectedVariant) {
+      availableStock = selectedVariant.stock_qty || 0;
+    } else {
+      availableStock = product.stock_qty || 0;
+    }
+
+    // Get cart quantity for this product/variant
+    const variantName = hasVariants && selectedVariant ? selectedVariant.name : null;
+    const cartKey = variantName ? `${product.id}_${variantName}` : `${product.id}`;
+    const cartItem = cartItems.find(i => i.cartKey === cartKey);
+    const cartQty = cartItem ? cartItem.qty : 0;
+
+    const maxCanAdd = Math.max(0, availableStock - cartQty);
+    const isLowStock = availableStock > 0 && availableStock <= lowStockThreshold;
+    const isOutOfStock = availableStock <= 0;
+
+    return { availableStock, cartQty, maxCanAdd, isLowStock, isOutOfStock };
+  }, [product, selectedVariant, cartItems, lowStockThreshold]);
+
+  const { availableStock, cartQty, maxCanAdd, isLowStock, isOutOfStock } = stockInfo;
 
   useEffect(() => {
     setLoading(true);
     setError(null);
+    setQuantity(1);
     api.getProduct(id)
-      .then(setProduct)
+      .then(data => {
+        setProduct(data);
+        setDisplayImage(data.image || '');
+        // Set default variant if product has variants (pick first in-stock one)
+        if (data.variants && data.variants.length > 0) {
+          const firstInStock = data.variants.find(v => (v.stock_qty || 0) > 0) || data.variants[0];
+          setSelectedVariant(firstInStock);
+          if (firstInStock.image) setDisplayImage(firstInStock.image);
+        }
+      })
       .catch(e => setError(e.message))
       .finally(() => setLoading(false));
   }, [id]);
 
+  // Reset quantity when variant changes
+  useEffect(() => {
+    setQuantity(1);
+  }, [selectedVariant]);
+
+  // Adjust quantity if it exceeds available stock (e.g., after cart changes)
+  useEffect(() => {
+    if (maxCanAdd > 0 && quantity > maxCanAdd) {
+      setQuantity(maxCanAdd);
+    } else if (maxCanAdd > 0 && quantity === 0) {
+      setQuantity(1);
+    }
+  }, [maxCanAdd, quantity]);
+
+  const handleVariantSelect = (variant) => {
+    if ((variant.stock_qty || 0) <= 0) return; // Can't select out-of-stock
+    setSelectedVariant(variant);
+    // Update displayed image
+    setDisplayImage(variant.image || product.image || '');
+  };
+
   const handleAddToCart = () => {
+    const hasVariants = product.variants && product.variants.length > 0;
     for (let i = 0; i < quantity; i++) {
-      addItem({ id: product.id, name: product.name, price: product.price, image: product.image });
+      addItem({
+        id: product.id,
+        name: product.name,
+        price: product.price,
+        image: displayImage || product.image,
+        variant: hasVariants && selectedVariant ? selectedVariant.name : null,
+      });
     }
     setAdded(true);
     setTimeout(() => setAdded(false), 2000);
   };
 
   const handleBuyNow = () => {
+    const hasVariants = product.variants && product.variants.length > 0;
     for (let i = 0; i < quantity; i++) {
-      addItem({ id: product.id, name: product.name, price: product.price, image: product.image });
+      addItem({
+        id: product.id,
+        name: product.name,
+        price: product.price,
+        image: displayImage || product.image,
+        variant: hasVariants && selectedVariant ? selectedVariant.name : null,
+      });
     }
     openCart();
   };
@@ -72,8 +164,8 @@ export default function ProductDetail({ settings }) {
         {/* Image Section */}
         <div style={s.imageSection}>
           <div style={s.mainImage}>
-            {product.image ? (
-              <img src={product.image} alt={product.name} style={s.img} />
+            {displayImage ? (
+              <img src={displayImage} alt={product.name} style={s.img} />
             ) : (
               <div style={s.placeholder}>
                 <span style={s.placeholderIcon}>◇</span>
@@ -95,11 +187,124 @@ export default function ProductDetail({ settings }) {
             </div>
           )}
 
+          {/* Variant/Color Selector */}
+          {product.variants && product.variants.length > 0 && (
+            <div style={s.variantWrap}>
+              <h3 style={s.variantTitle}>
+                Color: <span style={{ color: 'var(--kiosk-text)', fontWeight: 500 }}>{selectedVariant?.name || ''}</span>
+              </h3>
+
+              {/* Searchable Dropdown */}
+              <div style={s.searchDropdownWrap} ref={dropdownRef}>
+                <div style={s.searchInputWrap}>
+                  <span style={s.searchIcon}>🔍</span>
+                  <input
+                    type="text"
+                    value={searchText}
+                    onChange={(e) => {
+                      setSearchText(e.target.value);
+                      setDropdownOpen(true);
+                    }}
+                    onFocus={() => setDropdownOpen(true)}
+                    placeholder="Search colors..."
+                    style={s.searchInput}
+                  />
+                  <button
+                    onClick={() => setDropdownOpen(!dropdownOpen)}
+                    style={s.dropdownToggle}
+                  >
+                    {dropdownOpen ? '▲' : '▼'}
+                  </button>
+                </div>
+
+                {dropdownOpen && (
+                  <div style={s.dropdownList}>
+                    {product.variants
+                      .filter(v => v.name.toLowerCase().includes(searchText.toLowerCase()))
+                      .map((v, idx) => {
+                        const isSelected = selectedVariant?.name === v.name;
+                        const variantOutOfStock = (v.stock_qty || 0) <= 0;
+                        return (
+                          <button
+                            key={idx}
+                            onClick={() => {
+                              if (!variantOutOfStock) {
+                                handleVariantSelect(v);
+                                setSearchText('');
+                                setDropdownOpen(false);
+                              }
+                            }}
+                            disabled={variantOutOfStock}
+                            style={{
+                              ...s.dropdownItem,
+                              background: isSelected ? `${brand}20` : 'transparent',
+                              opacity: variantOutOfStock ? 0.5 : 1,
+                              cursor: variantOutOfStock ? 'not-allowed' : 'pointer',
+                            }}
+                          >
+                            <span
+                              style={{
+                                ...s.dropdownSwatch,
+                                background: v.color_code || '#888',
+                              }}
+                            />
+                            <span style={s.dropdownName}>{v.name}</span>
+                            {variantOutOfStock ? (
+                              <span style={s.dropdownStock}>Out of Stock</span>
+                            ) : (
+                              <span style={s.dropdownStockAvail}>{v.stock_qty} available</span>
+                            )}
+                          </button>
+                        );
+                      })}
+                    {product.variants.filter(v => v.name.toLowerCase().includes(searchText.toLowerCase())).length === 0 && (
+                      <div style={s.dropdownEmpty}>No colors match "{searchText}"</div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Color Swatches */}
+              <div style={s.variantOptions}>
+                {product.variants.map((v, idx) => {
+                  const isSelected = selectedVariant?.name === v.name;
+                  const variantOutOfStock = (v.stock_qty || 0) <= 0;
+                  return (
+                    <button
+                      key={idx}
+                      onClick={() => handleVariantSelect(v)}
+                      disabled={variantOutOfStock}
+                      title={variantOutOfStock ? `${v.name} - Out of Stock` : `${v.name} (${v.stock_qty} available)`}
+                      style={{
+                        ...s.variantSwatch,
+                        background: v.color_code || '#888',
+                        opacity: variantOutOfStock ? 0.35 : 1,
+                        cursor: variantOutOfStock ? 'not-allowed' : 'pointer',
+                        boxShadow: isSelected ? `0 0 0 3px ${brand}, 0 0 0 5px rgba(255,255,255,0.3)` : 'none',
+                        transform: isSelected ? 'scale(1.1)' : 'scale(1)',
+                      }}
+                    >
+                      {variantOutOfStock && <span style={s.outOfStockLine} />}
+                    </button>
+                  );
+                })}
+              </div>
+              {selectedVariant && (selectedVariant.stock_qty || 0) <= 0 && (
+                <p style={s.outOfStockText}>This color is currently out of stock</p>
+              )}
+            </div>
+          )}
+
           <div style={s.stockBadge}>
-            {product.in_stock ? (
-              <span style={s.inStock}>In Stock</span>
-            ) : (
+            {isOutOfStock ? (
               <span style={s.outOfStock}>Out of Stock</span>
+            ) : isLowStock ? (
+              <span style={s.lowStock}>Only {availableStock} left!</span>
+            ) : (
+              <span style={s.inStock}>In Stock</span>
+            )}
+            {cartQty > 0 && !isOutOfStock && (
+              <span style={s.cartNote}>({cartQty} in cart)</span>
             )}
           </div>
 
@@ -110,11 +315,17 @@ export default function ProductDetail({ settings }) {
               <button
                 onClick={() => setQuantity(q => Math.max(1, q - 1))}
                 style={s.qtyBtn}
+                disabled={quantity <= 1}
               >−</button>
               <span style={s.qtyValue}>{quantity}</span>
               <button
-                onClick={() => setQuantity(q => q + 1)}
-                style={s.qtyBtn}
+                onClick={() => setQuantity(q => Math.min(maxCanAdd, q + 1))}
+                style={{
+                  ...s.qtyBtn,
+                  opacity: quantity >= maxCanAdd ? 0.4 : 1,
+                  cursor: quantity >= maxCanAdd ? 'not-allowed' : 'pointer',
+                }}
+                disabled={quantity >= maxCanAdd}
               >+</button>
             </div>
           </div>
@@ -123,20 +334,25 @@ export default function ProductDetail({ settings }) {
           <div style={s.actions}>
             <button
               onClick={handleAddToCart}
-              disabled={!product.in_stock}
+              disabled={isOutOfStock || maxCanAdd <= 0}
               style={{
                 ...s.addBtn,
                 background: added ? '#4caf50' : 'transparent',
                 borderColor: added ? '#4caf50' : brand,
                 color: added ? '#fff' : brand,
+                opacity: (isOutOfStock || maxCanAdd <= 0) ? 0.5 : 1,
               }}
             >
-              {added ? '✓ Added to Cart' : 'Add to Cart'}
+              {added ? '✓ Added to Cart' : maxCanAdd <= 0 ? 'Max in Cart' : 'Add to Cart'}
             </button>
             <button
               onClick={handleBuyNow}
-              disabled={!product.in_stock}
-              style={{ ...s.buyBtn, background: brand }}
+              disabled={isOutOfStock || maxCanAdd <= 0}
+              style={{
+                ...s.buyBtn,
+                background: brand,
+                opacity: (isOutOfStock || maxCanAdd <= 0) ? 0.5 : 1,
+              }}
             >
               Buy Now
             </button>
@@ -290,6 +506,136 @@ const s = {
     lineHeight: 1.7,
     fontSize: '0.95rem',
   },
+  variantWrap: {
+    marginBottom: 28,
+  },
+  variantTitle: {
+    fontFamily: 'var(--font-body)',
+    fontSize: '0.8rem',
+    fontWeight: 600,
+    textTransform: 'uppercase',
+    letterSpacing: '0.08em',
+    color: 'var(--kiosk-text-secondary)',
+    marginBottom: 12,
+  },
+  searchDropdownWrap: {
+    position: 'relative',
+    marginBottom: 16,
+  },
+  searchInputWrap: {
+    display: 'flex',
+    alignItems: 'center',
+    background: 'var(--kiosk-card)',
+    border: '1px solid var(--kiosk-border)',
+    borderRadius: 'var(--radius-md)',
+    overflow: 'hidden',
+  },
+  searchIcon: {
+    padding: '0 12px',
+    fontSize: '1rem',
+    color: 'var(--kiosk-text-secondary)',
+  },
+  searchInput: {
+    flex: 1,
+    padding: '14px 0',
+    fontSize: '0.95rem',
+    background: 'transparent',
+    border: 'none',
+    color: 'var(--kiosk-text)',
+    outline: 'none',
+  },
+  dropdownToggle: {
+    padding: '14px 16px',
+    background: 'transparent',
+    border: 'none',
+    color: 'var(--kiosk-text-secondary)',
+    cursor: 'pointer',
+    fontSize: '0.8rem',
+  },
+  dropdownList: {
+    position: 'absolute',
+    top: '100%',
+    left: 0,
+    right: 0,
+    marginTop: 4,
+    background: 'var(--kiosk-card)',
+    border: '1px solid var(--kiosk-border)',
+    borderRadius: 'var(--radius-md)',
+    maxHeight: 280,
+    overflowY: 'auto',
+    zIndex: 100,
+    boxShadow: '0 8px 24px rgba(0,0,0,0.3)',
+  },
+  dropdownItem: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 12,
+    width: '100%',
+    padding: '12px 16px',
+    border: 'none',
+    borderBottom: '1px solid var(--kiosk-border)',
+    textAlign: 'left',
+    transition: 'background 0.15s',
+  },
+  dropdownSwatch: {
+    width: 28,
+    height: 28,
+    borderRadius: '50%',
+    flexShrink: 0,
+    border: '2px solid var(--kiosk-border)',
+  },
+  dropdownName: {
+    flex: 1,
+    fontSize: '0.9rem',
+    fontWeight: 500,
+    color: 'var(--kiosk-text)',
+  },
+  dropdownStock: {
+    fontSize: '0.75rem',
+    color: '#ef5350',
+    fontWeight: 500,
+  },
+  dropdownStockAvail: {
+    fontSize: '0.75rem',
+    color: 'var(--kiosk-text-secondary)',
+  },
+  dropdownEmpty: {
+    padding: '16px',
+    textAlign: 'center',
+    color: 'var(--kiosk-text-secondary)',
+    fontSize: '0.9rem',
+  },
+  variantOptions: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    gap: 12,
+  },
+  variantSwatch: {
+    width: 44,
+    height: 44,
+    borderRadius: '50%',
+    border: '3px solid var(--kiosk-border)',
+    cursor: 'pointer',
+    transition: 'all 0.2s',
+    position: 'relative',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  outOfStockLine: {
+    position: 'absolute',
+    width: '140%',
+    height: 2,
+    background: '#fff',
+    transform: 'rotate(-45deg)',
+    boxShadow: '0 0 2px rgba(0,0,0,0.5)',
+  },
+  outOfStockText: {
+    fontSize: '0.8rem',
+    color: '#ef5350',
+    marginTop: 10,
+    fontWeight: 500,
+  },
   stockBadge: {
     marginBottom: 28,
   },
@@ -308,6 +654,19 @@ const s = {
     background: 'rgba(239, 83, 80, 0.1)',
     padding: '6px 14px',
     borderRadius: 20,
+  },
+  lowStock: {
+    fontSize: '0.8rem',
+    fontWeight: 600,
+    color: '#ff9800',
+    background: 'rgba(255, 152, 0, 0.1)',
+    padding: '6px 14px',
+    borderRadius: 20,
+  },
+  cartNote: {
+    fontSize: '0.75rem',
+    color: 'var(--kiosk-text-secondary)',
+    marginLeft: 10,
   },
   quantityWrap: {
     display: 'flex',

@@ -48,6 +48,27 @@ export default function OrdersPanel() {
 
   useEffect(() => { load(); }, [load]);
 
+  const formatPayment = (order) => {
+    const method = order.payment_method || 'card';
+    const cardLast4 = order.card_last4;
+    const cardAmount = order.card_amount || 0;
+    const cashAmount = order.cash_amount || 0;
+
+    if (method === 'cash') {
+      return { label: 'Cash', detail: `$${cashAmount.toFixed(2)}` };
+    } else if (method === 'split') {
+      return {
+        label: 'Split',
+        detail: `$${cashAmount.toFixed(2)} Cash + $${cardAmount.toFixed(2)} Card${cardLast4 ? ` ••••${cardLast4}` : ''}`
+      };
+    } else {
+      return {
+        label: 'Card',
+        detail: cardLast4 ? `••••${cardLast4}` : 'Card'
+      };
+    }
+  };
+
   return (
     <div>
       <div style={s.header}>
@@ -88,58 +109,82 @@ export default function OrdersPanel() {
         </div>
       ) : (
         <div style={s.orderList}>
-          {orders.map(order => (
-            <div key={order.id} style={s.orderCard}>
-              <div
-                style={s.orderHeader}
-                onClick={() => setExpandedOrder(expandedOrder === order.id ? null : order.id)}
-              >
-                <div style={s.orderLeft}>
-                  <span style={s.orderId}>#{order.id}</span>
-                  <span style={s.orderDate}>{formatDate(order.created_at)}</span>
+          {orders.map(order => {
+            const payment = formatPayment(order);
+            return (
+              <div key={order.id} style={s.orderCard}>
+                <div
+                  style={s.orderHeader}
+                  onClick={() => setExpandedOrder(expandedOrder === order.id ? null : order.id)}
+                >
+                  <div style={s.orderLeft}>
+                    <span style={s.orderId}>#{order.id}</span>
+                    <span style={s.orderDate}>{formatDate(order.created_at)}</span>
+                  </div>
+                  <div style={s.orderRight}>
+                    <span style={{
+                      ...s.paymentBadge,
+                      ...(order.payment_method === 'cash' ? s.paymentCash :
+                          order.payment_method === 'split' ? s.paymentSplit : s.paymentCard),
+                    }}>
+                      {payment.label}
+                    </span>
+                    <span style={{
+                      ...s.statusBadge,
+                      ...(order.status === 'approved' ? s.statusApproved :
+                          order.status === 'declined' ? s.statusDeclined : s.statusPending),
+                    }}>
+                      {order.status}
+                    </span>
+                    <span style={s.orderTotal}>${order.total.toFixed(2)}</span>
+                    <span style={s.expandIcon}>{expandedOrder === order.id ? '▾' : '▸'}</span>
+                  </div>
                 </div>
-                <div style={s.orderRight}>
-                  <span style={{
-                    ...s.statusBadge,
-                    ...(order.status === 'approved' ? s.statusApproved :
-                        order.status === 'declined' ? s.statusDeclined : s.statusPending),
-                  }}>
-                    {order.status}
-                  </span>
-                  <span style={s.orderTotal}>${order.total.toFixed(2)}</span>
-                  <span style={s.expandIcon}>{expandedOrder === order.id ? '▾' : '▸'}</span>
-                </div>
-              </div>
 
-              {expandedOrder === order.id && (
-                <div style={s.orderDetails}>
-                  <div style={s.itemsTable}>
-                    {(order.items || []).map((item, i) => (
-                      <div key={i} style={s.itemRow}>
-                        <span style={s.itemName}>{item.name}</span>
-                        <span style={s.itemQty}>×{item.qty}</span>
-                        <span style={s.itemPrice}>${(item.price * item.qty).toFixed(2)}</span>
+                {expandedOrder === order.id && (
+                  <div style={s.orderDetails}>
+                    {/* Payment Info */}
+                    <div style={s.paymentInfo}>
+                      <span style={s.paymentLabel}>Payment:</span>
+                      <span style={s.paymentDetail}>{payment.detail}</span>
+                    </div>
+
+                    {/* Items Table */}
+                    <div style={s.itemsTable}>
+                      {(order.items || []).map((item, i) => (
+                        <div key={i} style={s.itemRow}>
+                          <div style={{ flex: 1 }}>
+                            <span style={s.itemName}>{item.name}</span>
+                            {item.variant && (
+                              <span style={s.itemVariant}> — {item.variant}</span>
+                            )}
+                          </div>
+                          <span style={s.itemQty}>×{item.qty}</span>
+                          <span style={s.itemPrice}>${(item.price * item.qty).toFixed(2)}</span>
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* Order Summary */}
+                    <div style={s.orderSummary}>
+                      <div style={s.summaryRow}>
+                        <span>Subtotal</span><span>${order.subtotal.toFixed(2)}</span>
                       </div>
-                    ))}
+                      <div style={s.summaryRow}>
+                        <span>Tax</span><span>${order.tax.toFixed(2)}</span>
+                      </div>
+                      <div style={{ ...s.summaryRow, fontWeight: 600, color: 'var(--admin-text)' }}>
+                        <span>Total</span><span>${order.total.toFixed(2)}</span>
+                      </div>
+                      {order.payment_ref && (
+                        <div style={s.refRow}>Ref: {order.payment_ref}</div>
+                      )}
+                    </div>
                   </div>
-                  <div style={s.orderSummary}>
-                    <div style={s.summaryRow}>
-                      <span>Subtotal</span><span>${order.subtotal.toFixed(2)}</span>
-                    </div>
-                    <div style={s.summaryRow}>
-                      <span>Tax</span><span>${order.tax.toFixed(2)}</span>
-                    </div>
-                    <div style={{ ...s.summaryRow, fontWeight: 600, color: 'var(--admin-text)' }}>
-                      <span>Total</span><span>${order.total.toFixed(2)}</span>
-                    </div>
-                    {order.payment_ref && (
-                      <div style={s.refRow}>Ref: {order.payment_ref}</div>
-                    )}
-                  </div>
-                </div>
-              )}
-            </div>
-          ))}
+                )}
+              </div>
+            );
+          })}
         </div>
       )}
     </div>
@@ -168,8 +213,14 @@ const s = {
   orderLeft: { display: 'flex', alignItems: 'center', gap: 16 },
   orderId: { fontSize: '0.9rem', fontWeight: 600, color: 'var(--admin-text)' },
   orderDate: { fontSize: '0.8rem', color: 'var(--admin-text-hint)' },
-  orderRight: { display: 'flex', alignItems: 'center', gap: 16 },
-  statusBadge: { fontSize: '0.7rem', fontWeight: 600, padding: '4px 12px', borderRadius: 'var(--radius-sm)', textTransform: 'uppercase', letterSpacing: '0.05em' },
+  orderRight: { display: 'flex', alignItems: 'center', gap: 12 },
+
+  paymentBadge: { fontSize: '0.68rem', fontWeight: 600, padding: '4px 10px', borderRadius: 'var(--radius-sm)', textTransform: 'uppercase', letterSpacing: '0.04em' },
+  paymentCard: { background: 'rgba(33, 150, 243, 0.1)', color: '#2196f3' },
+  paymentCash: { background: 'rgba(76, 175, 80, 0.1)', color: '#4caf50' },
+  paymentSplit: { background: 'rgba(156, 39, 176, 0.1)', color: '#9c27b0' },
+
+  statusBadge: { fontSize: '0.68rem', fontWeight: 600, padding: '4px 10px', borderRadius: 'var(--radius-sm)', textTransform: 'uppercase', letterSpacing: '0.04em' },
   statusApproved: { background: 'rgba(76, 175, 80, 0.1)', color: '#4caf50' },
   statusDeclined: { background: 'rgba(229, 115, 115, 0.1)', color: '#e57373' },
   statusPending: { background: 'rgba(255, 152, 0, 0.1)', color: '#ff9800' },
@@ -177,13 +228,27 @@ const s = {
   expandIcon: { fontSize: '0.8rem', color: 'var(--admin-text-hint)', width: 20, textAlign: 'center' },
 
   orderDetails: { borderTop: '1px solid var(--admin-border)', padding: '20px 24px' },
+
+  paymentInfo: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 16,
+    padding: '12px 16px',
+    background: 'var(--admin-surface)',
+    borderRadius: 'var(--radius-sm)',
+  },
+  paymentLabel: { fontSize: '0.82rem', fontWeight: 600, color: 'var(--admin-text-secondary)' },
+  paymentDetail: { fontSize: '0.88rem', color: 'var(--admin-text)', fontFamily: 'monospace' },
+
   itemsTable: { display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 16 },
   itemRow: { display: 'flex', alignItems: 'center', gap: 12 },
-  itemName: { flex: 1, fontSize: '0.88rem', color: 'var(--admin-text)' },
+  itemName: { fontSize: '0.88rem', color: 'var(--admin-text)' },
+  itemVariant: { fontSize: '0.82rem', color: 'var(--brand)', fontWeight: 500 },
   itemQty: { fontSize: '0.82rem', color: 'var(--admin-text-hint)', width: 40 },
   itemPrice: { fontSize: '0.88rem', fontWeight: 500, color: 'var(--admin-text)', width: 70, textAlign: 'right' },
 
   orderSummary: { borderTop: '1px solid var(--admin-border)', paddingTop: 12, display: 'flex', flexDirection: 'column', gap: 6, maxWidth: 250, marginLeft: 'auto' },
   summaryRow: { display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', color: 'var(--admin-text-secondary)' },
-  refRow: { fontSize: '0.78rem', color: 'var(--admin-text-hint)', textAlign: 'right', marginTop: 8 },
+  refRow: { fontSize: '0.78rem', color: 'var(--admin-text-hint)', textAlign: 'right', marginTop: 8, fontFamily: 'monospace' },
 };

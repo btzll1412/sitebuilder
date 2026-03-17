@@ -1,14 +1,35 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { useCart } from '../CartContext';
 import * as api from '../api';
+
+// Helper to check if product can be added directly from grid
+function canAddFromGrid(product) {
+  const hasVariants = product.variants && product.variants.length > 0;
+
+  // Has variants - must go to detail page to select
+  if (hasVariants) {
+    // Check if any variant has stock
+    const totalVariantStock = product.variants.reduce((sum, v) => sum + (v.stock_qty || 0), 0);
+    if (totalVariantStock <= 0) {
+      return { canAdd: false, reason: 'out_of_stock' };
+    }
+    return { canAdd: false, reason: 'variants' };
+  }
+
+  // No variants - check main stock_qty
+  if (product.stock_qty !== undefined && product.stock_qty <= 0) {
+    return { canAdd: false, reason: 'out_of_stock' };
+  }
+  return { canAdd: true, reason: null };
+}
 
 export default function ShopPage({ settings }) {
   const [products, setProducts] = useState([]);
   const [categories, setCategories] = useState([]);
   const [activeCategory, setActiveCategory] = useState('');
   const [loading, setLoading] = useState(true);
-  const { addItem } = useCart();
+  const { addItem, items: cartItems } = useCart();
   const [addedId, setAddedId] = useState(null);
   const sectionRefs = useRef({});
   const isScrolling = useRef(false);
@@ -71,6 +92,16 @@ export default function ShopPage({ settings }) {
   };
 
   const handleAdd = (product) => {
+    // Check if we can add more (for products without variants)
+    const cartKey = `${product.id}`;
+    const cartItem = cartItems.find(i => i.cartKey === cartKey);
+    const cartQty = cartItem ? cartItem.qty : 0;
+    const availableStock = product.stock_qty || 0;
+
+    if (cartQty >= availableStock) {
+      return; // Can't add more
+    }
+
     addItem({ id: product.id, name: product.name, price: product.price, image: product.image });
     setAddedId(product.id);
     setTimeout(() => setAddedId(null), 1500);
@@ -134,6 +165,7 @@ export default function ShopPage({ settings }) {
                     brand={brand}
                     onAdd={() => handleAdd(product)}
                     justAdded={addedId === product.id}
+                    cartItems={cartItems}
                   />
                 ))}
               </div>
@@ -145,8 +177,45 @@ export default function ShopPage({ settings }) {
   );
 }
 
-function ProductCard({ product, brand, onAdd, justAdded }) {
+function ProductCard({ product, brand, onAdd, justAdded, cartItems = [] }) {
   const [hovered, setHovered] = useState(false);
+  const navigate = useNavigate();
+  const { canAdd, reason } = canAddFromGrid(product);
+
+  // Check if cart already has max stock
+  const cartKey = `${product.id}`;
+  const cartItem = cartItems.find(i => i.cartKey === cartKey);
+  const cartQty = cartItem ? cartItem.qty : 0;
+  const availableStock = product.stock_qty || 0;
+  const atMaxStock = !product.variants?.length && cartQty >= availableStock;
+
+  const handleAddClick = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (reason === 'variants') {
+      navigate(`/product/${product.id}`);
+    } else if (canAdd && !atMaxStock) {
+      onAdd();
+    }
+  };
+
+  const getButtonText = () => {
+    if (justAdded) return '✓ Added';
+    if (reason === 'out_of_stock') return 'Out of Stock';
+    if (reason === 'variants') return 'Select Options';
+    if (atMaxStock) return 'Max in Cart';
+    return 'Add to Cart';
+  };
+
+  const getButtonStyle = () => {
+    if (justAdded) {
+      return { ...s.addBtn, background: '#4caf50', cursor: 'pointer' };
+    }
+    if (reason === 'out_of_stock' || atMaxStock) {
+      return { ...s.addBtn, background: '#666', cursor: 'not-allowed', opacity: 0.7 };
+    }
+    return { ...s.addBtn, background: brand, cursor: 'pointer' };
+  };
 
   return (
     <div
@@ -180,13 +249,11 @@ function ProductCard({ product, brand, onAdd, justAdded }) {
       </Link>
       <div style={s.cardActions}>
         <button
-          onClick={(e) => { e.preventDefault(); onAdd(); }}
-          style={{
-            ...s.addBtn,
-            background: justAdded ? '#4caf50' : brand,
-          }}
+          onClick={handleAddClick}
+          disabled={reason === 'out_of_stock' || atMaxStock}
+          style={getButtonStyle()}
         >
-          {justAdded ? '✓ Added' : 'Add to Cart'}
+          {getButtonText()}
         </button>
       </div>
     </div>
