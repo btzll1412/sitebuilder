@@ -186,6 +186,14 @@ export async function getOrderStats() {
   return request('/api/orders/stats');
 }
 
+export async function voidOrder(orderId) {
+  return request(`/api/orders/${orderId}/void`, { method: 'POST' });
+}
+
+export async function deleteOrder(orderId) {
+  return request(`/api/orders/${orderId}`, { method: 'DELETE' });
+}
+
 // ─── Upload ─────────────────────────────────────────────────────────────────
 
 export async function uploadFile(file) {

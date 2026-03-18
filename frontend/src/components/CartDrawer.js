@@ -332,9 +332,10 @@ export default function CartDrawer({ settings }) {
               {paymentMethod === 'cash' && (
                 <div style={s.cashInfo}>
                   <div style={s.cashInfoIcon}>💵</div>
-                  <p style={s.cashInfoText}>
-                    Collect <strong>${total.toFixed(2)}</strong> in cash from customer.
-                  </p>
+                  <p style={s.cashInfoText} dangerouslySetInnerHTML={{
+                    __html: (settings?.cash_payment_message || 'Collect ${amount} in cash from customer.')
+                      .replace('${amount}', `<strong>$${total.toFixed(2)}</strong>`)
+                  }} />
                 </div>
               )}
 

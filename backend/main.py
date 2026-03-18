@@ -239,6 +239,7 @@ def _seed_data(cur: sqlite3.Cursor):
         "low_stock_threshold": "5",
         "screen_timeout": "120",
         "screen_timeout_warning": "30",
+        "cash_payment_message": "Collect ${amount} in cash from customer.",
     }
     for k, v in defaults.items():
         cur.execute(
@@ -807,7 +808,7 @@ async def delete_page(page_id: int, admin_id: int = Depends(verify_token)):
 SAFE_SETTINGS = [
     "site_name", "logo_text", "tax_rate", "primary_color", "accent_color",
     "bg_color", "bg_image", "surface_color", "card_color", "text_color", "timezone",
-    "low_stock_threshold", "screen_timeout", "screen_timeout_warning"
+    "low_stock_threshold", "screen_timeout", "screen_timeout_warning", "cash_payment_message"
 ]
 ALL_SETTINGS = SAFE_SETTINGS + ["usaepay_key", "usaepay_pin", "usaepay_sandbox"]
 
@@ -1206,6 +1207,127 @@ async def get_order_stats(admin_id: int = Depends(verify_token)):
             conn.close()
     except Exception:
         raise HTTPException(status_code=500, detail="Failed to fetch order stats")
+
+
+@app.post("/api/orders/{order_id}/void")
+async def void_order(order_id: int, admin_id: int = Depends(verify_token)):
+    """Void an order - returns stock to inventory and marks order as voided."""
+    try:
+        conn = get_db()
+        try:
+            # Get the order
+            order = conn.execute(
+                "SELECT * FROM orders WHERE id = ?", (order_id,)
+            ).fetchone()
+            if not order:
+                raise HTTPException(status_code=404, detail="Order not found")
+
+            if order["status"] == "voided":
+                raise HTTPException(status_code=400, detail="Order is already voided")
+
+            # Only void approved orders (declined orders didn't take stock)
+            if order["status"] == "approved":
+                # Return stock to products
+                items = json.loads(order["items"])
+                for item in items:
+                    product = conn.execute(
+                        "SELECT * FROM products WHERE id = ?", (item["id"],)
+                    ).fetchone()
+                    if not product:
+                        continue
+
+                    variants = json.loads(product["variants"] or "[]")
+                    item_variant = item.get("variant")
+
+                    if variants and item_variant:
+                        # Return to variant stock
+                        for v in variants:
+                            if v["name"] == item_variant:
+                                v["stock_qty"] = v.get("stock_qty", 0) + item["qty"]
+                                break
+                        conn.execute(
+                            "UPDATE products SET variants = ? WHERE id = ?",
+                            (json.dumps(variants), item["id"])
+                        )
+                    else:
+                        # Return to product-level stock
+                        new_qty = product["stock_qty"] + item["qty"]
+                        conn.execute(
+                            "UPDATE products SET stock_qty = ? WHERE id = ?",
+                            (new_qty, item["id"])
+                        )
+
+            # Mark order as voided
+            conn.execute(
+                "UPDATE orders SET status = 'voided' WHERE id = ?",
+                (order_id,)
+            )
+            conn.commit()
+
+            return {"ok": True, "message": "Order voided and stock returned"}
+        finally:
+            conn.close()
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(status_code=500, detail="Failed to void order")
+
+
+@app.delete("/api/orders/{order_id}")
+async def delete_order(order_id: int, admin_id: int = Depends(verify_token)):
+    """Permanently delete an order from the system."""
+    try:
+        conn = get_db()
+        try:
+            # Get the order
+            order = conn.execute(
+                "SELECT * FROM orders WHERE id = ?", (order_id,)
+            ).fetchone()
+            if not order:
+                raise HTTPException(status_code=404, detail="Order not found")
+
+            # If order was approved and not voided, return stock first
+            if order["status"] == "approved":
+                items = json.loads(order["items"])
+                for item in items:
+                    product = conn.execute(
+                        "SELECT * FROM products WHERE id = ?", (item["id"],)
+                    ).fetchone()
+                    if not product:
+                        continue
+
+                    variants = json.loads(product["variants"] or "[]")
+                    item_variant = item.get("variant")
+
+                    if variants and item_variant:
+                        # Return to variant stock
+                        for v in variants:
+                            if v["name"] == item_variant:
+                                v["stock_qty"] = v.get("stock_qty", 0) + item["qty"]
+                                break
+                        conn.execute(
+                            "UPDATE products SET variants = ? WHERE id = ?",
+                            (json.dumps(variants), item["id"])
+                        )
+                    else:
+                        # Return to product-level stock
+                        new_qty = product["stock_qty"] + item["qty"]
+                        conn.execute(
+                            "UPDATE products SET stock_qty = ? WHERE id = ?",
+                            (new_qty, item["id"])
+                        )
+
+            # Delete the order
+            conn.execute("DELETE FROM orders WHERE id = ?", (order_id,))
+            conn.commit()
+
+            return {"ok": True, "message": "Order deleted permanently"}
+        finally:
+            conn.close()
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(status_code=500, detail="Failed to delete order")
 
 
 # ─── File Upload ─────────────────────────────────────────────────────────────

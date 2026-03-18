@@ -288,6 +288,18 @@ export default function SettingsPanel() {
           <p style={{ fontSize: '0.75rem', color: 'var(--admin-text-hint)', marginTop: 8 }}>
             After the timeout, a "Still here?" message appears for the warning duration. If no response, cart is cleared and kiosk returns to home.
           </p>
+          <div style={{ marginTop: 20 }}>
+            <label style={s.label}>Cash Payment Message</label>
+            <textarea
+              value={settings.cash_payment_message || 'Collect ${amount} in cash from customer.'}
+              onChange={e => update('cash_payment_message', e.target.value)}
+              style={{ ...s.input, marginTop: 6, minHeight: 80, resize: 'vertical' }}
+              placeholder="Collect ${amount} in cash from customer."
+            />
+            <p style={{ fontSize: '0.75rem', color: 'var(--admin-text-hint)', marginTop: 6 }}>
+              Use <code style={{ background: 'var(--admin-surface)', padding: '2px 6px', borderRadius: 4 }}>${'{amount}'}</code> as a placeholder for the total amount.
+            </p>
+          </div>
         </section>
 
         {/* Payment */}

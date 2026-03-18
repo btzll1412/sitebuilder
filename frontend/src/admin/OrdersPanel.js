@@ -48,6 +48,28 @@ export default function OrdersPanel() {
 
   useEffect(() => { load(); }, [load]);
 
+  const handleVoid = async (orderId) => {
+    if (!window.confirm('Void this order? Stock will be returned to inventory.')) return;
+    try {
+      await api.voidOrder(orderId);
+      toast.success('Order voided and stock returned');
+      load(); // Refresh orders and stats
+    } catch (err) {
+      toast.error(err.message);
+    }
+  };
+
+  const handleDelete = async (orderId) => {
+    if (!window.confirm('Permanently delete this order? This cannot be undone. If the order was approved, stock will be returned.')) return;
+    try {
+      await api.deleteOrder(orderId);
+      toast.success('Order deleted permanently');
+      load(); // Refresh orders and stats
+    } catch (err) {
+      toast.error(err.message);
+    }
+  };
+
   const formatPayment = (order) => {
     const method = order.payment_method || 'card';
     const cardLast4 = order.card_last4;
@@ -132,7 +154,8 @@ export default function OrdersPanel() {
                     <span style={{
                       ...s.statusBadge,
                       ...(order.status === 'approved' ? s.statusApproved :
-                          order.status === 'declined' ? s.statusDeclined : s.statusPending),
+                          order.status === 'declined' ? s.statusDeclined :
+                          order.status === 'voided' ? s.statusVoided : s.statusPending),
                     }}>
                       {order.status}
                     </span>
@@ -180,6 +203,29 @@ export default function OrdersPanel() {
                         <div style={s.refRow}>Ref: {order.payment_ref}</div>
                       )}
                     </div>
+
+                    {/* Order Actions */}
+                    <div style={s.orderActions}>
+                      {order.status !== 'voided' && (
+                        <button
+                          onClick={() => handleVoid(order.id)}
+                          style={s.voidBtn}
+                        >
+                          Void Order
+                        </button>
+                      )}
+                      <button
+                        onClick={() => handleDelete(order.id)}
+                        style={s.deleteBtn}
+                      >
+                        Delete Order
+                      </button>
+                    </div>
+                    {order.status === 'voided' && (
+                      <div style={s.voidedNotice}>
+                        This order has been voided. Stock was returned to inventory.
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -224,6 +270,7 @@ const s = {
   statusApproved: { background: 'rgba(76, 175, 80, 0.1)', color: '#4caf50' },
   statusDeclined: { background: 'rgba(229, 115, 115, 0.1)', color: '#e57373' },
   statusPending: { background: 'rgba(255, 152, 0, 0.1)', color: '#ff9800' },
+  statusVoided: { background: 'rgba(158, 158, 158, 0.1)', color: '#9e9e9e' },
   orderTotal: { fontSize: '0.95rem', fontWeight: 600, color: 'var(--admin-text)', minWidth: 70, textAlign: 'right' },
   expandIcon: { fontSize: '0.8rem', color: 'var(--admin-text-hint)', width: 20, textAlign: 'center' },
 
@@ -251,4 +298,9 @@ const s = {
   orderSummary: { borderTop: '1px solid var(--admin-border)', paddingTop: 12, display: 'flex', flexDirection: 'column', gap: 6, maxWidth: 250, marginLeft: 'auto' },
   summaryRow: { display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', color: 'var(--admin-text-secondary)' },
   refRow: { fontSize: '0.78rem', color: 'var(--admin-text-hint)', textAlign: 'right', marginTop: 8, fontFamily: 'monospace' },
+
+  orderActions: { marginTop: 16, paddingTop: 16, borderTop: '1px solid var(--admin-border)', display: 'flex', justifyContent: 'flex-end', gap: 12 },
+  voidBtn: { padding: '10px 20px', fontSize: '0.82rem', fontWeight: 600, color: '#ff9800', background: 'rgba(255, 152, 0, 0.1)', border: '1px solid rgba(255, 152, 0, 0.3)', borderRadius: 'var(--radius-md)', cursor: 'pointer', transition: 'all 0.15s' },
+  deleteBtn: { padding: '10px 20px', fontSize: '0.82rem', fontWeight: 600, color: '#e57373', background: 'rgba(229, 115, 115, 0.1)', border: '1px solid rgba(229, 115, 115, 0.3)', borderRadius: 'var(--radius-md)', cursor: 'pointer', transition: 'all 0.15s' },
+  voidedNotice: { marginTop: 16, padding: '12px 16px', fontSize: '0.82rem', color: '#9e9e9e', background: 'rgba(158, 158, 158, 0.08)', borderRadius: 'var(--radius-sm)', textAlign: 'center' },
 };

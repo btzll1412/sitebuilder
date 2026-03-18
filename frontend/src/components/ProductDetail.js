@@ -67,6 +67,12 @@ export default function ProductDetail({ settings }) {
     setQuantity(1);
     api.getProduct(id)
       .then(data => {
+        // Sort variants alphabetically by name
+        if (data.variants && data.variants.length > 0) {
+          data.variants.sort((a, b) =>
+            (a.name || '').toLowerCase().localeCompare((b.name || '').toLowerCase())
+          );
+        }
         setProduct(data);
         setDisplayImage(data.image || '');
         // Set default variant if product has variants (pick first in-stock one)
@@ -95,7 +101,7 @@ export default function ProductDetail({ settings }) {
   }, [maxCanAdd, quantity]);
 
   const handleVariantSelect = (variant) => {
-    if ((variant.stock_qty || 0) <= 0) return; // Can't select out-of-stock
+    // Allow selecting out-of-stock variants to view image, just can't add to cart
     setSelectedVariant(variant);
     // Update displayed image
     setDisplayImage(variant.image || product.image || '');
@@ -228,18 +234,15 @@ export default function ProductDetail({ settings }) {
                           <button
                             key={idx}
                             onClick={() => {
-                              if (!variantOutOfStock) {
-                                handleVariantSelect(v);
-                                setSearchText('');
-                                setDropdownOpen(false);
-                              }
+                              handleVariantSelect(v);
+                              setSearchText('');
+                              setDropdownOpen(false);
                             }}
-                            disabled={variantOutOfStock}
                             style={{
                               ...s.dropdownItem,
                               background: isSelected ? `${brand}20` : 'transparent',
-                              opacity: variantOutOfStock ? 0.5 : 1,
-                              cursor: variantOutOfStock ? 'not-allowed' : 'pointer',
+                              opacity: variantOutOfStock ? 0.7 : 1,
+                              cursor: 'pointer',
                             }}
                           >
                             <span
@@ -273,13 +276,12 @@ export default function ProductDetail({ settings }) {
                     <button
                       key={idx}
                       onClick={() => handleVariantSelect(v)}
-                      disabled={variantOutOfStock}
                       title={variantOutOfStock ? `${v.name} - Out of Stock` : `${v.name} (${v.stock_qty} available)`}
                       style={{
                         ...s.variantSwatch,
                         background: v.color_code || '#888',
-                        opacity: variantOutOfStock ? 0.35 : 1,
-                        cursor: variantOutOfStock ? 'not-allowed' : 'pointer',
+                        opacity: variantOutOfStock ? 0.5 : 1,
+                        cursor: 'pointer',
                         boxShadow: isSelected ? `0 0 0 3px ${brand}, 0 0 0 5px rgba(255,255,255,0.3)` : 'none',
                         transform: isSelected ? 'scale(1.1)' : 'scale(1)',
                       }}

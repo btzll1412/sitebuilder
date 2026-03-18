@@ -367,7 +367,11 @@ function ProductForm({ product, categories, onSave, onCancel }) {
       fd.append('category', category || 'General');
       fd.append('stock_qty', parseInt(stockQty) || 0);
       fd.append('sort_order', parseInt(sortOrder) || 0);
-      fd.append('variants', JSON.stringify(variants));
+      // Sort variants alphabetically by name before saving
+      const sortedVariants = [...variants].sort((a, b) =>
+        (a.name || '').toLowerCase().localeCompare((b.name || '').toLowerCase())
+      );
+      fd.append('variants', JSON.stringify(sortedVariants));
       if (imageFile) fd.append('image', imageFile);
 
       if (product) {
