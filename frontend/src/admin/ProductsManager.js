@@ -354,6 +354,12 @@ function ProductForm({ product, categories, onSave, onCancel }) {
     }
   };
 
+  // Capitalize first letter of each word
+  const capitalizeWords = (str) => {
+    if (!str) return str;
+    return str.trim().replace(/\b\w/g, char => char.toUpperCase());
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!validate()) return;
@@ -361,16 +367,16 @@ function ProductForm({ product, categories, onSave, onCancel }) {
     setLoading(true);
     try {
       const fd = new FormData();
-      fd.append('name', name.trim());
+      fd.append('name', capitalizeWords(name));
       fd.append('description', description);
       fd.append('price', parseFloat(price));
       fd.append('category', category || 'General');
       fd.append('stock_qty', parseInt(stockQty) || 0);
       fd.append('sort_order', parseInt(sortOrder) || 0);
-      // Sort variants alphabetically by name before saving
-      const sortedVariants = [...variants].sort((a, b) =>
-        (a.name || '').toLowerCase().localeCompare((b.name || '').toLowerCase())
-      );
+      // Sort variants alphabetically and capitalize names before saving
+      const sortedVariants = [...variants]
+        .map(v => ({ ...v, name: capitalizeWords(v.name) }))
+        .sort((a, b) => (a.name || '').toLowerCase().localeCompare((b.name || '').toLowerCase()));
       fd.append('variants', JSON.stringify(sortedVariants));
       if (imageFile) fd.append('image', imageFile);
 
