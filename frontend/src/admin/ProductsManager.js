@@ -50,9 +50,7 @@ export default function ProductsManager() {
     .filter(p => filterCategory === 'all' || p.category === filterCategory)
     .filter(p => {
       if (!searchQuery.trim()) return true;
-      const q = searchQuery.toLowerCase();
-      return p.name.toLowerCase().includes(q) ||
-             (p.description || '').toLowerCase().includes(q);
+      return p.name.toLowerCase().includes(searchQuery.toLowerCase());
     })
     .sort((a, b) => a.name.localeCompare(b.name));
 
