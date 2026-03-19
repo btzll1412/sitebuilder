@@ -216,14 +216,21 @@ function ProductGridBlock({ p, brand }) {
   const { addItem, items: cartItems } = useCart();
 
   useEffect(() => {
-    const cat = p.category === 'all' ? undefined : p.category;
-    api.getProducts(cat)
+    const options = {};
+    if (p.category_id) {
+      options.category_id = p.category_id;
+      options.include_subcategories = p.include_subcategories !== false;
+    } else if (p.category && p.category !== 'all') {
+      options.category = p.category;
+    }
+
+    api.getProducts(options)
       .then(data => {
         setProducts(p.limit ? data.slice(0, p.limit) : data);
       })
       .catch(() => {})
       .finally(() => setLoading(false));
-  }, [p.category, p.limit]);
+  }, [p.category, p.category_id, p.include_subcategories, p.limit]);
 
   const handleAdd = (product) => {
     // Check if we can add more (for products without variants)
@@ -293,12 +300,19 @@ function ProductCard({ product, brand, onAdd, justAdded, cartItems = [] }) {
   const availableStock = product.stock_qty || 0;
   const atMaxStock = !product.variants?.length && cartQty >= availableStock;
 
+  const saveScrollAndNavigate = () => {
+    // Save current scroll position and path before navigating to product
+    sessionStorage.setItem('scrollPosition', window.scrollY.toString());
+    sessionStorage.setItem('scrollPath', window.location.pathname);
+    navigate(`/product/${product.id}`);
+  };
+
   const handleAddClick = (e) => {
     e.preventDefault();
     e.stopPropagation();
     if (reason === 'variants') {
       // Navigate to detail page to select variant
-      navigate(`/product/${product.id}`);
+      saveScrollAndNavigate();
     } else if (canAdd && !atMaxStock) {
       onAdd();
     }
@@ -348,7 +362,7 @@ function ProductCard({ product, brand, onAdd, justAdded, cartItems = [] }) {
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
     >
-      <Link to={`/product/${product.id}`} style={{ textDecoration: 'none' }}>
+      <div onClick={saveScrollAndNavigate} style={{ textDecoration: 'none', cursor: 'pointer' }}>
         <div style={{
           aspectRatio: '3/4',
           background: 'var(--kiosk-elevated)',
@@ -422,7 +436,7 @@ function ProductCard({ product, brand, onAdd, justAdded, cartItems = [] }) {
             </span>
           </div>
         </div>
-      </Link>
+      </div>
       <div style={{ padding: '14px 20px 20px' }}>
         <button
           onClick={handleAddClick}
@@ -669,11 +683,17 @@ function ShopProductCard({ product, brand, onAdd, justAdded, cartItems = [] }) {
   const availableStock = product.stock_qty || 0;
   const atMaxStock = !product.variants?.length && cartQty >= availableStock;
 
+  const saveScrollAndNavigate = () => {
+    sessionStorage.setItem('scrollPosition', window.scrollY.toString());
+    sessionStorage.setItem('scrollPath', window.location.pathname);
+    navigate(`/product/${product.id}`);
+  };
+
   const handleAddClick = (e) => {
     e.preventDefault();
     e.stopPropagation();
     if (reason === 'variants') {
-      navigate(`/product/${product.id}`);
+      saveScrollAndNavigate();
     } else if (canAdd && !atMaxStock) {
       onAdd();
     }
@@ -722,7 +742,7 @@ function ShopProductCard({ product, brand, onAdd, justAdded, cartItems = [] }) {
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
     >
-      <Link to={`/product/${product.id}`} style={{ textDecoration: 'none' }}>
+      <div onClick={saveScrollAndNavigate} style={{ textDecoration: 'none', cursor: 'pointer' }}>
         <div style={{ aspectRatio: '1/1', background: 'var(--kiosk-elevated)', overflow: 'hidden' }}>
           {product.image ? (
             <img src={product.image} alt={product.name} style={{ width: '100%', height: '100%', objectFit: 'cover', transition: 'transform 0.5s ease', transform: hovered ? 'scale(1.05)' : 'scale(1)' }} />
@@ -734,7 +754,7 @@ function ShopProductCard({ product, brand, onAdd, justAdded, cartItems = [] }) {
           <h4 style={{ fontFamily: 'var(--font-display)', fontSize: '0.95rem', fontWeight: 500, color: 'var(--kiosk-text)', marginBottom: 4 }}>{product.name}</h4>
           <span style={{ fontFamily: 'var(--font-display)', fontSize: '1rem', fontWeight: 600, color: brand }}>${product.price.toFixed(2)}</span>
         </div>
-      </Link>
+      </div>
       <div style={{ padding: '8px 16px 16px' }}>
         <button
           onClick={handleAddClick}
@@ -1000,6 +1020,41 @@ function TwoColumnBlock({ p }) {
 
 function CategoryGridBlock({ p, brand }) {
   const [hoveredIndex, setHoveredIndex] = useState(-1);
+  const [categories, setCategories] = useState(p.categories || []);
+  const navigate = useNavigate();
+
+  // If use_hierarchical is true, fetch from API
+  useEffect(() => {
+    if (p.use_hierarchical) {
+      api.getCategoriesTree()
+        .then(data => {
+          // Flatten to top-level categories or use as configured
+          const cats = p.show_subcategories
+            ? data.flatMap(c => [c, ...(c.children || [])])
+            : data;
+          setCategories(cats.map(c => ({
+            id: c.id,
+            name: c.name,
+            image: c.image,
+            link: `/shop?category=${c.id}`,
+          })));
+        })
+        .catch(() => {});
+    } else {
+      setCategories(p.categories || []);
+    }
+  }, [p.use_hierarchical, p.show_subcategories, p.categories]);
+
+  const handleClick = (e, cat) => {
+    e.preventDefault();
+    if (cat.link) {
+      if (cat.link.startsWith('/')) {
+        navigate(cat.link);
+      } else {
+        window.location.href = cat.link;
+      }
+    }
+  };
 
   return (
     <section style={{ padding: '80px 40px', maxWidth: 1100, margin: '0 auto' }}>
@@ -1017,13 +1072,14 @@ function CategoryGridBlock({ p, brand }) {
       )}
       <div style={{
         display: 'grid',
-        gridTemplateColumns: `repeat(${Math.min((p.categories || []).length, 4)}, 1fr)`,
+        gridTemplateColumns: `repeat(${Math.min(categories.length || 1, 4)}, 1fr)`,
         gap: 20,
       }}>
-        {(p.categories || []).map((cat, i) => (
+        {categories.map((cat, i) => (
           <a
-            key={i}
+            key={cat.id || i}
             href={cat.link || '#'}
+            onClick={(e) => handleClick(e, cat)}
             style={{
               background: 'var(--kiosk-card)',
               borderRadius: 'var(--radius-lg)',

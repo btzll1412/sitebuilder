@@ -15,6 +15,8 @@ export default function ProductsManager() {
   const [loading, setLoading] = useState(true);
   const [filterCategory, setFilterCategory] = useState('all');
   const [categories, setCategories] = useState([]);
+  const [categoriesTree, setCategoriesTree] = useState([]);
+  const [skinConcerns, setSkinConcerns] = useState([]);
   const [editingId, setEditingId] = useState(null);
   const [showForm, setShowForm] = useState(false);
   const [selected, setSelected] = useState(new Set());
@@ -23,8 +25,14 @@ export default function ProductsManager() {
   const loadProducts = useCallback(async () => {
     try {
       setLoading(true);
-      const data = await api.getAllProducts();
+      const [data, catTree, concerns] = await Promise.all([
+        api.getAllProducts(),
+        api.getCategoriesTree(),
+        api.getSkinConcerns(),
+      ]);
       setProducts(data);
+      setCategoriesTree(catTree);
+      setSkinConcerns(concerns);
       const cats = [...new Set(data.map(p => p.category))].sort();
       setCategories(cats);
     } catch (err) {
@@ -168,6 +176,8 @@ export default function ProductsManager() {
         <ProductForm
           product={editingId ? products.find(p => p.id === editingId) : null}
           categories={categories}
+          categoriesTree={categoriesTree}
+          skinConcerns={skinConcerns}
           onSave={() => { setShowForm(false); setEditingId(null); loadProducts(); }}
           onCancel={() => { setShowForm(false); setEditingId(null); }}
         />
@@ -280,14 +290,20 @@ export default function ProductsManager() {
 
 // ─── Product Form ───────────────────────────────────────────────────────────
 
-function ProductForm({ product, categories, onSave, onCancel }) {
+function ProductForm({ product, categories, categoriesTree, skinConcerns, onSave, onCancel }) {
   const [name, setName] = useState(product?.name || '');
   const [description, setDescription] = useState(product?.description || '');
   const [price, setPrice] = useState(product?.price?.toString() || '');
   const [category, setCategory] = useState(product?.category || '');
+  const [categoryId, setCategoryId] = useState(product?.category_id?.toString() || '');
+  const [selectedConcerns, setSelectedConcerns] = useState(
+    product?.skin_concerns?.map(c => c.id) || []
+  );
   const [stockQty, setStockQty] = useState(product?.stock_qty?.toString() || '0');
   const [sortOrder, setSortOrder] = useState(product?.sort_order?.toString() || '0');
-  const [variants, setVariants] = useState(product?.variants || []);
+  const [variants, setVariants] = useState(
+    (product?.variants || []).map(v => ({ ...v, display_type: v.display_type || 'swatch' }))
+  );
   const [imageFile, setImageFile] = useState(null);
   const [imagePreview, setImagePreview] = useState(product?.image || '');
   const [loading, setLoading] = useState(false);
@@ -295,8 +311,29 @@ function ProductForm({ product, categories, onSave, onCancel }) {
   const fileRef = useRef(null);
   const toast = useToast();
 
+  // Flatten categories tree for dropdown
+  const flattenCategories = (items, depth = 0) => {
+    let result = [];
+    for (const item of items) {
+      result.push({ ...item, depth });
+      if (item.children && item.children.length > 0) {
+        result = result.concat(flattenCategories(item.children, depth + 1));
+      }
+    }
+    return result;
+  };
+  const flatCategories = flattenCategories(categoriesTree || []);
+
+  const toggleConcern = (concernId) => {
+    setSelectedConcerns(prev =>
+      prev.includes(concernId)
+        ? prev.filter(id => id !== concernId)
+        : [...prev, concernId]
+    );
+  };
+
   const addVariant = () => {
-    setVariants([...variants, { name: '', color_code: '#C2185B', image: '', stock_qty: 10 }]);
+    setVariants([...variants, { name: '', color_code: '#C2185B', image: '', stock_qty: 10, display_type: 'swatch' }]);
   };
 
   const updateVariant = (index, field, value) => {
@@ -371,20 +408,30 @@ function ProductForm({ product, categories, onSave, onCancel }) {
       fd.append('description', description);
       fd.append('price', parseFloat(price));
       fd.append('category', category || 'General');
+      if (categoryId) {
+        fd.append('category_id', parseInt(categoryId));
+      }
       fd.append('stock_qty', parseInt(stockQty) || 0);
       fd.append('sort_order', parseInt(sortOrder) || 0);
       // Sort variants alphabetically and capitalize names before saving
       const sortedVariants = [...variants]
-        .map(v => ({ ...v, name: capitalizeWords(v.name) }))
+        .map(v => ({ ...v, name: capitalizeWords(v.name), display_type: v.display_type || 'swatch' }))
         .sort((a, b) => (a.name || '').toLowerCase().localeCompare((b.name || '').toLowerCase()));
       fd.append('variants', JSON.stringify(sortedVariants));
       if (imageFile) fd.append('image', imageFile);
 
+      let savedProduct;
       if (product) {
-        await api.updateProduct(product.id, fd);
+        savedProduct = await api.updateProduct(product.id, fd);
+        // Update skin concerns
+        await api.updateProductSkinConcerns(product.id, selectedConcerns);
         toast.success('Product updated');
       } else {
-        await api.createProduct(fd);
+        savedProduct = await api.createProduct(fd);
+        // Set skin concerns for new product
+        if (selectedConcerns.length > 0) {
+          await api.updateProductSkinConcerns(savedProduct.id, selectedConcerns);
+        }
         toast.success('Product created');
       }
       onSave();
@@ -443,16 +490,39 @@ function ProductForm({ product, categories, onSave, onCancel }) {
           <div style={formStyles.row}>
             <div style={formStyles.field}>
               <label style={formStyles.label}>Category</label>
-              <input
-                value={category}
-                onChange={e => setCategory(e.target.value)}
-                style={formStyles.input}
-                placeholder="General"
-                list="categories"
-              />
-              <datalist id="categories">
-                {categories.map(c => <option key={c} value={c} />)}
-              </datalist>
+              {flatCategories.length > 0 ? (
+                <select
+                  value={categoryId}
+                  onChange={e => {
+                    const catId = e.target.value;
+                    setCategoryId(catId);
+                    // Also set the text category for backwards compatibility
+                    const selected = flatCategories.find(c => c.id === parseInt(catId));
+                    if (selected) setCategory(selected.name);
+                  }}
+                  style={formStyles.input}
+                >
+                  <option value="">Select a category...</option>
+                  {flatCategories.map(c => (
+                    <option key={c.id} value={c.id}>
+                      {'—'.repeat(c.depth)} {c.name}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <input
+                  value={category}
+                  onChange={e => setCategory(e.target.value)}
+                  style={formStyles.input}
+                  placeholder="General"
+                  list="categories"
+                />
+              )}
+              {flatCategories.length === 0 && (
+                <datalist id="categories">
+                  {categories.map(c => <option key={c} value={c} />)}
+                </datalist>
+              )}
             </div>
             <div style={formStyles.field}>
               <label style={formStyles.label}>Sort Order</label>
@@ -464,6 +534,38 @@ function ProductForm({ product, categories, onSave, onCancel }) {
               />
             </div>
           </div>
+
+          {/* Skin Concerns */}
+          {skinConcerns && skinConcerns.length > 0 && (
+            <div style={formStyles.field}>
+              <label style={formStyles.label}>Skin Concerns</label>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                {skinConcerns.map(concern => (
+                  <button
+                    key={concern.id}
+                    type="button"
+                    onClick={() => toggleConcern(concern.id)}
+                    style={{
+                      padding: '8px 14px',
+                      fontSize: '0.82rem',
+                      fontWeight: 500,
+                      borderRadius: 20,
+                      border: selectedConcerns.includes(concern.id) ? '2px solid var(--brand)' : '1px solid var(--admin-border)',
+                      background: selectedConcerns.includes(concern.id) ? 'var(--brand-light)' : 'var(--admin-surface)',
+                      color: selectedConcerns.includes(concern.id) ? 'var(--brand)' : 'var(--admin-text-secondary)',
+                      cursor: 'pointer',
+                      transition: 'all 0.15s',
+                    }}
+                  >
+                    {selectedConcerns.includes(concern.id) && '✓ '}{concern.name}
+                  </button>
+                ))}
+              </div>
+              <p style={{ fontSize: '0.75rem', color: 'var(--admin-text-hint)', marginTop: 8 }}>
+                Select skin concerns this product addresses
+              </p>
+            </div>
+          )}
 
           <div style={formStyles.field}>
             <label style={formStyles.label}>Colors / Variants</label>
@@ -530,6 +632,46 @@ function ProductForm({ product, categories, onSave, onCancel }) {
                       {v.image && (
                         <img src={v.image} alt="" style={{ width: 36, height: 36, objectFit: 'cover', borderRadius: 4 }} />
                       )}
+                    </div>
+                    {/* Display Type Toggle */}
+                    <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginTop: 10 }}>
+                      <span style={{ fontSize: '0.75rem', color: 'var(--admin-text-hint)' }}>Show as:</span>
+                      <div style={{ display: 'flex', borderRadius: 'var(--radius-sm)', overflow: 'hidden', border: '1px solid var(--admin-border)' }}>
+                        <button
+                          type="button"
+                          onClick={() => updateVariant(idx, 'display_type', 'swatch')}
+                          style={{
+                            padding: '6px 12px',
+                            fontSize: '0.75rem',
+                            fontWeight: 500,
+                            border: 'none',
+                            background: (v.display_type || 'swatch') === 'swatch' ? 'var(--brand)' : 'var(--admin-surface)',
+                            color: (v.display_type || 'swatch') === 'swatch' ? '#fff' : 'var(--admin-text-secondary)',
+                            cursor: 'pointer',
+                          }}
+                        >
+                          Color Swatch
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => updateVariant(idx, 'display_type', 'image')}
+                          style={{
+                            padding: '6px 12px',
+                            fontSize: '0.75rem',
+                            fontWeight: 500,
+                            border: 'none',
+                            borderLeft: '1px solid var(--admin-border)',
+                            background: v.display_type === 'image' ? 'var(--brand)' : 'var(--admin-surface)',
+                            color: v.display_type === 'image' ? '#fff' : 'var(--admin-text-secondary)',
+                            cursor: 'pointer',
+                          }}
+                        >
+                          Image Thumbnail
+                        </button>
+                      </div>
+                      <span style={{ fontSize: '0.7rem', color: 'var(--admin-text-hint)', marginLeft: 6 }}>
+                        {(v.display_type || 'swatch') === 'swatch' ? 'Shows color circle' : 'Shows small image'}
+                      </span>
                     </div>
                   </div>
                 ))}

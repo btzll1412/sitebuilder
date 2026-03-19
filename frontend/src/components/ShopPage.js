@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useCart } from '../CartContext';
 import * as api from '../api';
@@ -26,26 +26,86 @@ function canAddFromGrid(product) {
 
 export default function ShopPage({ settings }) {
   const [products, setProducts] = useState([]);
-  const [categories, setCategories] = useState([]);
-  const [activeCategory, setActiveCategory] = useState('');
+  const [categoriesTree, setCategoriesTree] = useState([]);
+  const [skinConcerns, setSkinConcerns] = useState([]);
+  const [selectedConcerns, setSelectedConcerns] = useState([]);
+  const [expandedCategories, setExpandedCategories] = useState(new Set());
+  const [activeCategory, setActiveCategory] = useState(null);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState(null);
   const [loading, setLoading] = useState(true);
   const { addItem, items: cartItems } = useCart();
   const [addedId, setAddedId] = useState(null);
   const sectionRefs = useRef({});
   const isScrolling = useRef(false);
+  const searchTimeout = useRef(null);
 
   const brand = settings?.primary_color || '#C2185B';
 
+  // Load initial data
   useEffect(() => {
-    Promise.all([api.getProducts(), api.getCategories()])
-      .then(([prods, cats]) => {
+    Promise.all([
+      api.getProducts(),
+      api.getCategoriesTree(),
+      api.getSkinConcerns(),
+    ])
+      .then(([prods, catTree, concerns]) => {
         setProducts(prods);
-        setCategories(cats);
-        if (cats.length > 0) setActiveCategory(cats[0]);
+        setCategoriesTree(catTree);
+        setSkinConcerns(concerns);
+        // Auto-expand top-level categories
+        const topLevelIds = new Set(catTree.map(c => c.id));
+        setExpandedCategories(topLevelIds);
       })
       .catch(() => {})
       .finally(() => setLoading(false));
   }, []);
+
+  // Debounced search
+  const handleSearch = useCallback((query) => {
+    setSearchQuery(query);
+    if (searchTimeout.current) clearTimeout(searchTimeout.current);
+
+    if (!query || query.length < 2) {
+      setSearchResults(null);
+      return;
+    }
+
+    searchTimeout.current = setTimeout(async () => {
+      try {
+        const results = await api.searchProducts(query);
+        setSearchResults(results);
+      } catch (err) {
+        console.error('Search error:', err);
+      }
+    }, 300);
+  }, []);
+
+  // Filter products by selected concerns
+  const filteredProducts = useCallback(() => {
+    if (searchResults !== null) return searchResults;
+    if (selectedConcerns.length === 0) return products;
+
+    return products.filter(p => {
+      const productConcernIds = (p.skin_concerns || []).map(c => c.id);
+      return selectedConcerns.some(id => productConcernIds.includes(id));
+    });
+  }, [products, selectedConcerns, searchResults]);
+
+  // Get flat list of category names for section rendering
+  const getFlatCategories = (items) => {
+    let result = [];
+    for (const item of items) {
+      result.push(item);
+      if (item.children && item.children.length > 0) {
+        result = result.concat(getFlatCategories(item.children));
+      }
+    }
+    return result;
+  };
+
+  const flatCategories = getFlatCategories(categoriesTree);
+  const categoryNames = flatCategories.map(c => c.name);
 
   // Track which section is in view
   useEffect(() => {
@@ -56,18 +116,18 @@ export default function ShopPage({ settings }) {
       const atBottom = window.innerHeight + window.scrollY >= document.body.scrollHeight - 50;
 
       // If at bottom, activate last category
-      if (atBottom && categories.length > 0) {
-        setActiveCategory(categories[categories.length - 1]);
+      if (atBottom && categoryNames.length > 0) {
+        setActiveCategory(categoryNames[categoryNames.length - 1]);
         return;
       }
 
-      for (const cat of categories) {
-        const el = sectionRefs.current[cat];
+      for (const catName of categoryNames) {
+        const el = sectionRefs.current[catName];
         if (el) {
           const top = el.offsetTop;
           const bottom = top + el.offsetHeight;
           if (scrollPos >= top && scrollPos < bottom) {
-            setActiveCategory(cat);
+            setActiveCategory(catName);
             break;
           }
         }
@@ -75,20 +135,38 @@ export default function ShopPage({ settings }) {
     };
     window.addEventListener('scroll', handleScroll);
     return () => window.removeEventListener('scroll', handleScroll);
-  }, [categories]);
+  }, [categoryNames]);
 
-  const scrollToCategory = (cat) => {
-    setActiveCategory(cat);
+  const scrollToCategory = (catName) => {
+    setActiveCategory(catName);
     isScrolling.current = true;
-    const el = sectionRefs.current[cat];
+    const el = sectionRefs.current[catName];
     if (el) {
       const top = el.offsetTop - 100;
       window.scrollTo({ top, behavior: 'smooth' });
     }
-    // Re-enable scroll detection after animation
     setTimeout(() => {
       isScrolling.current = false;
     }, 800);
+  };
+
+  const toggleCategoryExpand = (catId) => {
+    setExpandedCategories(prev => {
+      const next = new Set(prev);
+      if (next.has(catId)) next.delete(catId);
+      else next.add(catId);
+      return next;
+    });
+  };
+
+  const toggleConcern = (concernId) => {
+    setSelectedConcerns(prev =>
+      prev.includes(concernId)
+        ? prev.filter(id => id !== concernId)
+        : [...prev, concernId]
+    );
+    setSearchResults(null);
+    setSearchQuery('');
   };
 
   const handleAdd = (product) => {
@@ -107,10 +185,57 @@ export default function ShopPage({ settings }) {
     setTimeout(() => setAddedId(null), 1500);
   };
 
-  const productsByCategory = categories.reduce((acc, cat) => {
-    acc[cat] = products.filter(p => p.category === cat);
+  const displayProducts = filteredProducts();
+  const productsByCategory = categoryNames.reduce((acc, catName) => {
+    acc[catName] = displayProducts.filter(p => p.category === catName);
     return acc;
   }, {});
+
+  // Render category tree item
+  const renderCategoryItem = (cat, depth = 0) => {
+    const hasChildren = cat.children && cat.children.length > 0;
+    const isExpanded = expandedCategories.has(cat.id);
+    const isActive = activeCategory === cat.name;
+
+    return (
+      <React.Fragment key={cat.id}>
+        <div style={{ display: 'flex', alignItems: 'center' }}>
+          {hasChildren && (
+            <button
+              onClick={() => toggleCategoryExpand(cat.id)}
+              style={{
+                width: 20,
+                height: 20,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontSize: '0.6rem',
+                color: 'var(--kiosk-text-secondary)',
+                background: 'transparent',
+                border: 'none',
+                cursor: 'pointer',
+                marginLeft: depth * 12,
+              }}
+            >
+              {isExpanded ? '▼' : '▶'}
+            </button>
+          )}
+          <button
+            onClick={() => scrollToCategory(cat.name)}
+            style={{
+              ...s.sidebarLink,
+              paddingLeft: hasChildren ? 4 : (12 + depth * 12),
+              flex: 1,
+              ...(isActive ? { ...s.sidebarLinkActive, borderLeftColor: brand, color: brand } : {}),
+            }}
+          >
+            {cat.name}
+          </button>
+        </div>
+        {hasChildren && isExpanded && cat.children.map(child => renderCategoryItem(child, depth + 1))}
+      </React.Fragment>
+    );
+  };
 
   if (loading) {
     return (
@@ -125,52 +250,141 @@ export default function ShopPage({ settings }) {
       {/* Sidebar */}
       <aside style={s.sidebar}>
         <div style={s.sidebarInner}>
+          {/* Search */}
+          <div style={s.searchWrap}>
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={e => handleSearch(e.target.value)}
+              placeholder="Search products..."
+              style={s.searchInput}
+            />
+            {searchQuery && (
+              <button
+                onClick={() => { setSearchQuery(''); setSearchResults(null); }}
+                style={s.searchClear}
+              >✕</button>
+            )}
+          </div>
+
+          {/* Categories */}
           <h3 style={s.sidebarTitle}>Categories</h3>
           <nav style={s.sidebarNav}>
-            {categories.map(cat => (
-              <button
-                key={cat}
-                onClick={() => scrollToCategory(cat)}
-                style={{
-                  ...s.sidebarLink,
-                  ...(activeCategory === cat ? { ...s.sidebarLinkActive, borderLeftColor: brand, color: brand } : {}),
-                }}
-              >
-                {cat}
-              </button>
-            ))}
+            {categoriesTree.map(cat => renderCategoryItem(cat))}
           </nav>
+
+          {/* Skin Concerns Filter */}
+          {skinConcerns.length > 0 && (
+            <>
+              <h3 style={{ ...s.sidebarTitle, marginTop: 24 }}>Skin Concerns</h3>
+              <div style={s.concernsWrap}>
+                {skinConcerns.map(concern => (
+                  <button
+                    key={concern.id}
+                    onClick={() => toggleConcern(concern.id)}
+                    style={{
+                      ...s.concernPill,
+                      background: selectedConcerns.includes(concern.id) ? brand : 'var(--kiosk-card)',
+                      color: selectedConcerns.includes(concern.id) ? '#fff' : 'var(--kiosk-text-secondary)',
+                      borderColor: selectedConcerns.includes(concern.id) ? brand : 'var(--kiosk-border)',
+                    }}
+                  >
+                    {concern.name}
+                  </button>
+                ))}
+              </div>
+              {selectedConcerns.length > 0 && (
+                <button
+                  onClick={() => setSelectedConcerns([])}
+                  style={s.clearFilters}
+                >
+                  Clear filters
+                </button>
+              )}
+            </>
+          )}
         </div>
       </aside>
 
       {/* Main Content */}
       <main style={s.main}>
-        {categories.length === 0 ? (
+        {/* Search Results Banner */}
+        {searchResults !== null && (
+          <div style={s.searchBanner}>
+            <span>
+              {searchResults.length} result{searchResults.length !== 1 ? 's' : ''} for "{searchQuery}"
+            </span>
+            <button onClick={() => { setSearchQuery(''); setSearchResults(null); }} style={s.searchBannerClose}>
+              Clear search
+            </button>
+          </div>
+        )}
+
+        {/* Selected Concerns Banner */}
+        {selectedConcerns.length > 0 && searchResults === null && (
+          <div style={s.filterBanner}>
+            <span>Showing products for: </span>
+            {skinConcerns.filter(c => selectedConcerns.includes(c.id)).map(c => (
+              <span key={c.id} style={{ ...s.filterTag, borderColor: brand, color: brand }}>
+                {c.name}
+                <button onClick={() => toggleConcern(c.id)} style={s.filterTagRemove}>✕</button>
+              </span>
+            ))}
+          </div>
+        )}
+
+        {categoryNames.length === 0 && !searchResults ? (
           <div style={s.empty}>
             <p style={s.emptyText}>No products available yet.</p>
           </div>
-        ) : (
-          categories.map(cat => (
-            <section
-              key={cat}
-              ref={el => sectionRefs.current[cat] = el}
-              style={s.section}
-            >
-              <h2 style={{ ...s.sectionTitle, color: brand }}>{cat}</h2>
-              <div style={s.productGrid}>
-                {productsByCategory[cat]?.map(product => (
-                  <ProductCard
-                    key={product.id}
-                    product={product}
-                    brand={brand}
-                    onAdd={() => handleAdd(product)}
-                    justAdded={addedId === product.id}
-                    cartItems={cartItems}
-                  />
-                ))}
+        ) : searchResults !== null ? (
+          // Search results view - flat grid
+          <section style={s.section}>
+            <div style={s.productGrid}>
+              {searchResults.map(product => (
+                <ProductCard
+                  key={product.id}
+                  product={product}
+                  brand={brand}
+                  onAdd={() => handleAdd(product)}
+                  justAdded={addedId === product.id}
+                  cartItems={cartItems}
+                />
+              ))}
+            </div>
+            {searchResults.length === 0 && (
+              <div style={s.empty}>
+                <p style={s.emptyText}>No products match your search.</p>
               </div>
-            </section>
-          ))
+            )}
+          </section>
+        ) : (
+          // Category sections view
+          categoryNames.map(catName => {
+            const catProducts = productsByCategory[catName] || [];
+            if (catProducts.length === 0) return null;
+            return (
+              <section
+                key={catName}
+                ref={el => sectionRefs.current[catName] = el}
+                style={s.section}
+              >
+                <h2 style={{ ...s.sectionTitle, color: brand }}>{catName}</h2>
+                <div style={s.productGrid}>
+                  {catProducts.map(product => (
+                    <ProductCard
+                      key={product.id}
+                      product={product}
+                      brand={brand}
+                      onAdd={() => handleAdd(product)}
+                      justAdded={addedId === product.id}
+                      cartItems={cartItems}
+                    />
+                  ))}
+                </div>
+              </section>
+            );
+          })
         )}
       </main>
     </div>
@@ -181,6 +395,13 @@ function ProductCard({ product, brand, onAdd, justAdded, cartItems = [] }) {
   const [hovered, setHovered] = useState(false);
   const navigate = useNavigate();
   const { canAdd, reason } = canAddFromGrid(product);
+
+  const saveScrollAndNavigate = () => {
+    // Save current scroll position and path before navigating to product
+    sessionStorage.setItem('scrollPosition', window.scrollY.toString());
+    sessionStorage.setItem('scrollPath', window.location.pathname);
+    navigate(`/product/${product.id}`);
+  };
 
   // Check if cart already has max stock
   const cartKey = `${product.id}`;
@@ -227,7 +448,7 @@ function ProductCard({ product, brand, onAdd, justAdded, cartItems = [] }) {
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
     >
-      <Link to={`/product/${product.id}`} style={{ textDecoration: 'none' }}>
+      <div onClick={saveScrollAndNavigate} style={{ textDecoration: 'none', cursor: 'pointer' }}>
         <div style={s.cardImage}>
           {product.image ? (
             <img
@@ -246,7 +467,7 @@ function ProductCard({ product, brand, onAdd, justAdded, cartItems = [] }) {
           <h3 style={s.cardName}>{product.name}</h3>
           <span style={{ ...s.cardPrice, color: brand }}>${product.price.toFixed(2)}</span>
         </div>
-      </Link>
+      </div>
       <div style={s.cardActions}>
         <button
           onClick={handleAddClick}
@@ -280,7 +501,7 @@ const s = {
     animation: 'spin 0.8s linear infinite',
   },
   sidebar: {
-    width: 220,
+    width: 240,
     flexShrink: 0,
     background: 'var(--kiosk-surface)',
     borderRight: '1px solid var(--kiosk-border)',
@@ -290,17 +511,46 @@ const s = {
     overflowY: 'auto',
   },
   sidebarInner: {
-    padding: '32px 0',
+    padding: '24px 0',
+  },
+  searchWrap: {
+    padding: '0 16px 20px',
+    position: 'relative',
+  },
+  searchInput: {
+    width: '100%',
+    padding: '12px 36px 12px 14px',
+    fontSize: '0.9rem',
+    border: '1px solid var(--kiosk-border)',
+    borderRadius: 'var(--radius-md)',
+    background: 'var(--kiosk-card)',
+    color: 'var(--kiosk-text)',
+    outline: 'none',
+  },
+  searchClear: {
+    position: 'absolute',
+    right: 24,
+    top: 10,
+    width: 24,
+    height: 24,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    fontSize: '0.75rem',
+    color: 'var(--kiosk-text-secondary)',
+    background: 'transparent',
+    border: 'none',
+    cursor: 'pointer',
   },
   sidebarTitle: {
     fontFamily: 'var(--font-display)',
-    fontSize: '0.85rem',
+    fontSize: '0.8rem',
     fontWeight: 600,
     color: 'var(--kiosk-text-secondary)',
     textTransform: 'uppercase',
     letterSpacing: '0.1em',
-    padding: '0 24px',
-    marginBottom: 20,
+    padding: '0 20px',
+    marginBottom: 12,
   },
   sidebarNav: {
     display: 'flex',
@@ -308,22 +558,106 @@ const s = {
   },
   sidebarLink: {
     display: 'block',
-    padding: '14px 24px',
-    fontSize: '0.95rem',
+    padding: '10px 20px',
+    fontSize: '0.9rem',
     fontWeight: 500,
     color: 'var(--kiosk-text-secondary)',
     textAlign: 'left',
     background: 'transparent',
     border: 'none',
-    borderLeft: '4px solid transparent',
+    borderLeft: '3px solid transparent',
     cursor: 'pointer',
     transition: 'all 0.2s',
   },
   sidebarLinkActive: {
     background: 'var(--kiosk-elevated)',
     fontWeight: 600,
-    borderLeftWidth: '4px',
+    borderLeftWidth: '3px',
     borderLeftStyle: 'solid',
+  },
+  concernsWrap: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    gap: 8,
+    padding: '0 16px',
+  },
+  concernPill: {
+    padding: '8px 14px',
+    fontSize: '0.78rem',
+    fontWeight: 500,
+    borderRadius: 20,
+    border: '1px solid',
+    cursor: 'pointer',
+    transition: 'all 0.2s',
+  },
+  clearFilters: {
+    display: 'block',
+    margin: '12px 16px 0',
+    padding: '8px 14px',
+    fontSize: '0.75rem',
+    fontWeight: 500,
+    color: 'var(--kiosk-text-secondary)',
+    background: 'transparent',
+    border: 'none',
+    cursor: 'pointer',
+    textDecoration: 'underline',
+  },
+  searchBanner: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: '16px 24px',
+    marginBottom: 24,
+    background: 'var(--kiosk-card)',
+    borderRadius: 'var(--radius-md)',
+    fontSize: '0.9rem',
+    color: 'var(--kiosk-text)',
+  },
+  searchBannerClose: {
+    padding: '8px 16px',
+    fontSize: '0.82rem',
+    fontWeight: 500,
+    color: 'var(--kiosk-text-secondary)',
+    background: 'var(--kiosk-elevated)',
+    border: 'none',
+    borderRadius: 'var(--radius-sm)',
+    cursor: 'pointer',
+  },
+  filterBanner: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 10,
+    padding: '16px 24px',
+    marginBottom: 24,
+    background: 'var(--kiosk-card)',
+    borderRadius: 'var(--radius-md)',
+    fontSize: '0.9rem',
+    color: 'var(--kiosk-text-secondary)',
+    flexWrap: 'wrap',
+  },
+  filterTag: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: 6,
+    padding: '6px 12px',
+    fontSize: '0.8rem',
+    fontWeight: 500,
+    borderRadius: 16,
+    border: '1px solid',
+    background: 'transparent',
+  },
+  filterTagRemove: {
+    width: 16,
+    height: 16,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    fontSize: '0.7rem',
+    color: 'inherit',
+    background: 'transparent',
+    border: 'none',
+    cursor: 'pointer',
+    opacity: 0.7,
   },
   main: {
     flex: 1,

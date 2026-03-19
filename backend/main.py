@@ -85,10 +85,12 @@ def init_db():
             price REAL NOT NULL,
             image TEXT DEFAULT '',
             category TEXT DEFAULT 'General',
+            category_id INTEGER DEFAULT NULL,
             stock_qty INTEGER DEFAULT 0,
             sort_order INTEGER DEFAULT 0,
             variants TEXT DEFAULT '[]',
-            created_at TEXT DEFAULT (datetime('now'))
+            created_at TEXT DEFAULT (datetime('now')),
+            FOREIGN KEY (category_id) REFERENCES categories(id) ON DELETE SET NULL
         );
 
         CREATE TABLE IF NOT EXISTS pages (
@@ -132,6 +134,34 @@ def init_db():
             cash_amount REAL DEFAULT 0,
             created_at TEXT DEFAULT (datetime('now'))
         );
+
+        -- Hierarchical categories
+        CREATE TABLE IF NOT EXISTS categories (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            slug TEXT UNIQUE NOT NULL,
+            parent_id INTEGER DEFAULT NULL,
+            sort_order INTEGER DEFAULT 0,
+            image TEXT DEFAULT '',
+            FOREIGN KEY (parent_id) REFERENCES categories(id) ON DELETE SET NULL
+        );
+
+        -- Skin concerns master list
+        CREATE TABLE IF NOT EXISTS skin_concerns (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT UNIQUE NOT NULL,
+            slug TEXT UNIQUE NOT NULL,
+            sort_order INTEGER DEFAULT 0
+        );
+
+        -- Product-to-concerns many-to-many
+        CREATE TABLE IF NOT EXISTS product_skin_concerns (
+            product_id INTEGER NOT NULL,
+            skin_concern_id INTEGER NOT NULL,
+            PRIMARY KEY (product_id, skin_concern_id),
+            FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE,
+            FOREIGN KEY (skin_concern_id) REFERENCES skin_concerns(id) ON DELETE CASCADE
+        );
     """)
 
     # Migration: rename in_stock to stock_qty if old column exists
@@ -157,6 +187,57 @@ def init_db():
             cur.execute("ALTER TABLE orders ADD COLUMN card_amount REAL DEFAULT 0")
         if "cash_amount" not in cols:
             cur.execute("ALTER TABLE orders ADD COLUMN cash_amount REAL DEFAULT 0")
+    except Exception:
+        pass
+
+    # Migration: add category_id to products if missing
+    try:
+        cols = [row[1] for row in cur.execute("PRAGMA table_info(products)").fetchall()]
+        if "category_id" not in cols:
+            cur.execute("ALTER TABLE products ADD COLUMN category_id INTEGER DEFAULT NULL")
+    except Exception:
+        pass
+
+    # Seed default skin concerns if empty
+    try:
+        concern_count = cur.execute("SELECT COUNT(*) FROM skin_concerns").fetchone()[0]
+        if concern_count == 0:
+            default_concerns = [
+                ("Wrinkles", "wrinkles", 1),
+                ("Dry Skin", "dry-skin", 2),
+                ("Oily Skin", "oily-skin", 3),
+                ("Acne-Prone", "acne-prone", 4),
+                ("Sensitive", "sensitive", 5),
+                ("Anti-aging", "anti-aging", 6),
+            ]
+            for name, slug, sort in default_concerns:
+                cur.execute(
+                    "INSERT INTO skin_concerns (name, slug, sort_order) VALUES (?, ?, ?)",
+                    (name, slug, sort)
+                )
+    except Exception:
+        pass
+
+    # Migration: populate categories from existing product.category values
+    try:
+        cat_count = cur.execute("SELECT COUNT(*) FROM categories").fetchone()[0]
+        if cat_count == 0:
+            # Get distinct categories from products
+            existing_cats = cur.execute(
+                "SELECT DISTINCT category FROM products WHERE category IS NOT NULL AND category != ''"
+            ).fetchall()
+            for i, (cat_name,) in enumerate(existing_cats):
+                slug = cat_name.lower().replace(" ", "-").replace("'", "")
+                cur.execute(
+                    "INSERT OR IGNORE INTO categories (name, slug, sort_order) VALUES (?, ?, ?)",
+                    (cat_name, slug, i)
+                )
+            # Update products with category_id
+            cur.execute("""
+                UPDATE products SET category_id = (
+                    SELECT id FROM categories WHERE categories.name = products.category
+                ) WHERE category_id IS NULL AND category IS NOT NULL AND category != ''
+            """)
     except Exception:
         pass
 
@@ -421,7 +502,13 @@ def _get_total_stock(product_row) -> int:
 
 
 @app.get("/api/products")
-async def get_products(category: Optional[str] = None):
+async def get_products(
+    category: Optional[str] = None,
+    category_id: Optional[int] = None,
+    include_subcategories: bool = False,
+    skin_concerns: Optional[str] = None,
+    search: Optional[str] = None,
+):
     try:
         conn = get_db()
         try:
@@ -431,30 +518,79 @@ async def get_products(category: Optional[str] = None):
             ).fetchone()
             low_stock_threshold = int(threshold_row["value"]) if threshold_row else 5
 
-            # Get all products (including out of stock - frontend will show "Out of Stock")
+            # Build query
+            query = "SELECT DISTINCT p.* FROM products p"
+            conditions = []
+            params = []
+
+            # Join for skin concerns filtering
+            if skin_concerns:
+                query += " INNER JOIN product_skin_concerns psc ON p.id = psc.product_id"
+                concern_ids = [int(x) for x in skin_concerns.split(",") if x.strip()]
+                if concern_ids:
+                    placeholders = ",".join("?" * len(concern_ids))
+                    conditions.append(f"psc.skin_concern_id IN ({placeholders})")
+                    params.extend(concern_ids)
+
+            # Category filtering - by text or by id
             if category and category != "all":
-                rows = conn.execute(
-                    "SELECT * FROM products WHERE category = ? ORDER BY sort_order",
-                    (category,),
-                ).fetchall()
-            else:
-                rows = conn.execute(
-                    "SELECT * FROM products ORDER BY sort_order"
-                ).fetchall()
+                conditions.append("p.category = ?")
+                params.append(category)
+            elif category_id:
+                if include_subcategories:
+                    # Get all child category ids recursively
+                    category_ids = _get_category_tree_ids(conn, category_id)
+                    placeholders = ",".join("?" * len(category_ids))
+                    conditions.append(f"p.category_id IN ({placeholders})")
+                    params.extend(category_ids)
+                else:
+                    conditions.append("p.category_id = ?")
+                    params.append(category_id)
+
+            # Search filtering
+            if search:
+                search_term = f"%{search}%"
+                conditions.append("(p.name LIKE ? OR p.description LIKE ?)")
+                params.extend([search_term, search_term])
+
+            if conditions:
+                query += " WHERE " + " AND ".join(conditions)
+
+            query += " ORDER BY p.sort_order"
+
+            rows = conn.execute(query, params).fetchall()
 
             results = []
             for r in rows:
                 d = dict(r)
                 d["variants"] = json.loads(d.get("variants") or "[]")
                 d["low_stock_threshold"] = low_stock_threshold
-                # Add total_stock field for frontend convenience
                 d["total_stock"] = _get_total_stock(r)
+                # Get skin concerns for product
+                concerns = conn.execute(
+                    "SELECT sc.id, sc.name, sc.slug FROM skin_concerns sc "
+                    "INNER JOIN product_skin_concerns psc ON sc.id = psc.skin_concern_id "
+                    "WHERE psc.product_id = ? ORDER BY sc.sort_order",
+                    (d["id"],)
+                ).fetchall()
+                d["skin_concerns"] = [dict(c) for c in concerns]
                 results.append(d)
             return results
         finally:
             conn.close()
     except Exception:
         raise HTTPException(status_code=500, detail="Failed to fetch products")
+
+
+def _get_category_tree_ids(conn, parent_id: int) -> list:
+    """Get all category IDs including the parent and all descendants."""
+    result = [parent_id]
+    children = conn.execute(
+        "SELECT id FROM categories WHERE parent_id = ?", (parent_id,)
+    ).fetchall()
+    for child in children:
+        result.extend(_get_category_tree_ids(conn, child["id"]))
+    return result
 
 
 @app.get("/api/products/all")
@@ -493,6 +629,34 @@ async def get_categories():
         raise HTTPException(status_code=500, detail="Failed to fetch categories")
 
 
+@app.get("/api/products/search")
+async def search_products(q: str = ""):
+    """Search products by name and description."""
+    try:
+        if not q or len(q) < 2:
+            return []
+
+        conn = get_db()
+        try:
+            search_term = f"%{q}%"
+            rows = conn.execute(
+                "SELECT * FROM products WHERE name LIKE ? OR description LIKE ? ORDER BY sort_order LIMIT 20",
+                (search_term, search_term),
+            ).fetchall()
+
+            results = []
+            for r in rows:
+                d = dict(r)
+                d["variants"] = json.loads(d.get("variants") or "[]")
+                d["total_stock"] = _get_total_stock(r)
+                results.append(d)
+            return results
+        finally:
+            conn.close()
+    except Exception:
+        raise HTTPException(status_code=500, detail="Search failed")
+
+
 @app.get("/api/products/{product_id}")
 async def get_product(product_id: int):
     try:
@@ -513,6 +677,31 @@ async def get_product(product_id: int):
             result = dict(row)
             result["variants"] = json.loads(result.get("variants") or "[]")
             result["low_stock_threshold"] = low_stock_threshold
+
+            # Get skin concerns for product
+            concerns = conn.execute(
+                "SELECT sc.id, sc.name, sc.slug FROM skin_concerns sc "
+                "INNER JOIN product_skin_concerns psc ON sc.id = psc.skin_concern_id "
+                "WHERE psc.product_id = ? ORDER BY sc.sort_order",
+                (product_id,)
+            ).fetchall()
+            result["skin_concerns"] = [dict(c) for c in concerns]
+
+            # Get category info if category_id exists
+            if result.get("category_id"):
+                cat_row = conn.execute(
+                    "SELECT * FROM categories WHERE id = ?", (result["category_id"],)
+                ).fetchone()
+                if cat_row:
+                    result["category_info"] = dict(cat_row)
+                    # Get parent category if exists
+                    if cat_row["parent_id"]:
+                        parent_row = conn.execute(
+                            "SELECT * FROM categories WHERE id = ?", (cat_row["parent_id"],)
+                        ).fetchone()
+                        if parent_row:
+                            result["parent_category_info"] = dict(parent_row)
+
             return result
         finally:
             conn.close()
@@ -528,6 +717,7 @@ async def create_product(
     price: float = Form(...),
     description: str = Form(""),
     category: str = Form("General"),
+    category_id: Optional[int] = Form(None),
     stock_qty: int = Form(0),
     sort_order: int = Form(0),
     variants: str = Form("[]"),
@@ -547,8 +737,8 @@ async def create_product(
         conn = get_db()
         try:
             cur = conn.execute(
-                "INSERT INTO products (name, description, price, image, category, stock_qty, sort_order, variants) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                (name.strip(), description, price, image_path, category, stock_qty, sort_order, variants),
+                "INSERT INTO products (name, description, price, image, category, category_id, stock_qty, sort_order, variants) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (name.strip(), description, price, image_path, category, category_id, stock_qty, sort_order, variants),
             )
             conn.commit()
             product = conn.execute(
@@ -572,6 +762,7 @@ async def update_product(
     price: float = Form(...),
     description: str = Form(""),
     category: str = Form("General"),
+    category_id: Optional[int] = Form(None),
     stock_qty: int = Form(0),
     sort_order: int = Form(0),
     variants: str = Form("[]"),
@@ -597,8 +788,8 @@ async def update_product(
                 image_path = await _save_upload(image)
 
             conn.execute(
-                "UPDATE products SET name=?, description=?, price=?, image=?, category=?, stock_qty=?, sort_order=?, variants=? WHERE id=?",
-                (name.strip(), description, price, image_path, category, stock_qty, sort_order, variants, product_id),
+                "UPDATE products SET name=?, description=?, price=?, image=?, category=?, category_id=?, stock_qty=?, sort_order=?, variants=? WHERE id=?",
+                (name.strip(), description, price, image_path, category, category_id, stock_qty, sort_order, variants, product_id),
             )
             conn.commit()
             product = conn.execute(
@@ -658,6 +849,416 @@ async def reorder_products(request: Request, admin_id: int = Depends(verify_toke
         raise
     except Exception:
         raise HTTPException(status_code=500, detail="Failed to reorder products")
+
+
+# ─── Categories Routes ──────────────────────────────────────────────────────
+
+
+def _slugify(text: str) -> str:
+    """Convert text to URL-safe slug."""
+    import re
+    slug = text.lower().strip()
+    slug = re.sub(r"[^a-z0-9\s-]", "", slug)
+    slug = re.sub(r"[\s_]+", "-", slug)
+    slug = re.sub(r"-+", "-", slug)
+    return slug.strip("-")
+
+
+@app.get("/api/categories")
+async def get_categories_list():
+    """Get flat list of all categories."""
+    try:
+        conn = get_db()
+        try:
+            rows = conn.execute(
+                "SELECT * FROM categories ORDER BY sort_order, name"
+            ).fetchall()
+            return [dict(r) for r in rows]
+        finally:
+            conn.close()
+    except Exception:
+        raise HTTPException(status_code=500, detail="Failed to fetch categories")
+
+
+@app.get("/api/categories/tree")
+async def get_categories_tree():
+    """Get hierarchical category tree."""
+    try:
+        conn = get_db()
+        try:
+            rows = conn.execute(
+                "SELECT * FROM categories ORDER BY sort_order, name"
+            ).fetchall()
+            categories = [dict(r) for r in rows]
+
+            # Build tree structure
+            by_id = {c["id"]: {**c, "children": []} for c in categories}
+            root = []
+            for cat in categories:
+                if cat["parent_id"] and cat["parent_id"] in by_id:
+                    by_id[cat["parent_id"]]["children"].append(by_id[cat["id"]])
+                else:
+                    root.append(by_id[cat["id"]])
+            return root
+        finally:
+            conn.close()
+    except Exception:
+        raise HTTPException(status_code=500, detail="Failed to fetch category tree")
+
+
+@app.post("/api/categories")
+async def create_category(request: Request, admin_id: int = Depends(verify_token)):
+    try:
+        body = await request.json()
+        name = body.get("name", "").strip()
+        parent_id = body.get("parent_id")
+        image = body.get("image", "")
+        sort_order = body.get("sort_order", 0)
+
+        if not name:
+            raise HTTPException(status_code=400, detail="Category name is required")
+
+        slug = _slugify(name)
+
+        conn = get_db()
+        try:
+            # Check for duplicate slug
+            existing = conn.execute(
+                "SELECT id FROM categories WHERE slug = ?", (slug,)
+            ).fetchone()
+            if existing:
+                # Add number suffix
+                base_slug = slug
+                counter = 2
+                while existing:
+                    slug = f"{base_slug}-{counter}"
+                    existing = conn.execute(
+                        "SELECT id FROM categories WHERE slug = ?", (slug,)
+                    ).fetchone()
+                    counter += 1
+
+            cur = conn.execute(
+                "INSERT INTO categories (name, slug, parent_id, sort_order, image) VALUES (?, ?, ?, ?, ?)",
+                (name, slug, parent_id, sort_order, image),
+            )
+            conn.commit()
+            cat = conn.execute(
+                "SELECT * FROM categories WHERE id = ?", (cur.lastrowid,)
+            ).fetchone()
+            return dict(cat)
+        finally:
+            conn.close()
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(status_code=500, detail="Failed to create category")
+
+
+@app.put("/api/categories/{category_id}")
+async def update_category(category_id: int, request: Request, admin_id: int = Depends(verify_token)):
+    try:
+        body = await request.json()
+        conn = get_db()
+        try:
+            existing = conn.execute(
+                "SELECT * FROM categories WHERE id = ?", (category_id,)
+            ).fetchone()
+            if not existing:
+                raise HTTPException(status_code=404, detail="Category not found")
+
+            name = body.get("name", existing["name"]).strip()
+            parent_id = body.get("parent_id", existing["parent_id"])
+            image = body.get("image", existing["image"])
+            sort_order = body.get("sort_order", existing["sort_order"])
+
+            # Update slug if name changed
+            slug = existing["slug"]
+            if name != existing["name"]:
+                slug = _slugify(name)
+                # Check for duplicate slug
+                dup = conn.execute(
+                    "SELECT id FROM categories WHERE slug = ? AND id != ?", (slug, category_id)
+                ).fetchone()
+                if dup:
+                    base_slug = slug
+                    counter = 2
+                    while dup:
+                        slug = f"{base_slug}-{counter}"
+                        dup = conn.execute(
+                            "SELECT id FROM categories WHERE slug = ? AND id != ?", (slug, category_id)
+                        ).fetchone()
+                        counter += 1
+
+            # Prevent circular parent reference
+            if parent_id == category_id:
+                raise HTTPException(status_code=400, detail="Category cannot be its own parent")
+
+            conn.execute(
+                "UPDATE categories SET name=?, slug=?, parent_id=?, sort_order=?, image=? WHERE id=?",
+                (name, slug, parent_id, sort_order, image, category_id),
+            )
+            conn.commit()
+            cat = conn.execute(
+                "SELECT * FROM categories WHERE id = ?", (category_id,)
+            ).fetchone()
+            return dict(cat)
+        finally:
+            conn.close()
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(status_code=500, detail="Failed to update category")
+
+
+@app.delete("/api/categories/{category_id}")
+async def delete_category(category_id: int, admin_id: int = Depends(verify_token)):
+    try:
+        conn = get_db()
+        try:
+            existing = conn.execute(
+                "SELECT id FROM categories WHERE id = ?", (category_id,)
+            ).fetchone()
+            if not existing:
+                raise HTTPException(status_code=404, detail="Category not found")
+
+            # Set child categories' parent_id to null
+            conn.execute(
+                "UPDATE categories SET parent_id = NULL WHERE parent_id = ?", (category_id,)
+            )
+            # Set products' category_id to null
+            conn.execute(
+                "UPDATE products SET category_id = NULL WHERE category_id = ?", (category_id,)
+            )
+            conn.execute("DELETE FROM categories WHERE id = ?", (category_id,))
+            conn.commit()
+            return {"ok": True}
+        finally:
+            conn.close()
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(status_code=500, detail="Failed to delete category")
+
+
+@app.patch("/api/categories/reorder")
+async def reorder_categories(request: Request, admin_id: int = Depends(verify_token)):
+    try:
+        body = await request.json()
+        ids = body.get("ids", [])
+        if not ids:
+            raise HTTPException(status_code=400, detail="No category IDs provided")
+
+        conn = get_db()
+        try:
+            for i, cid in enumerate(ids):
+                conn.execute(
+                    "UPDATE categories SET sort_order = ? WHERE id = ?", (i, cid)
+                )
+            conn.commit()
+            return {"ok": True}
+        finally:
+            conn.close()
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(status_code=500, detail="Failed to reorder categories")
+
+
+# ─── Skin Concerns Routes ────────────────────────────────────────────────────
+
+
+@app.get("/api/skin-concerns")
+async def get_skin_concerns():
+    try:
+        conn = get_db()
+        try:
+            rows = conn.execute(
+                "SELECT * FROM skin_concerns ORDER BY sort_order, name"
+            ).fetchall()
+            return [dict(r) for r in rows]
+        finally:
+            conn.close()
+    except Exception:
+        raise HTTPException(status_code=500, detail="Failed to fetch skin concerns")
+
+
+@app.post("/api/skin-concerns")
+async def create_skin_concern(request: Request, admin_id: int = Depends(verify_token)):
+    try:
+        body = await request.json()
+        name = body.get("name", "").strip()
+        sort_order = body.get("sort_order", 0)
+
+        if not name:
+            raise HTTPException(status_code=400, detail="Skin concern name is required")
+
+        slug = _slugify(name)
+
+        conn = get_db()
+        try:
+            # Check for duplicate
+            existing = conn.execute(
+                "SELECT id FROM skin_concerns WHERE slug = ?", (slug,)
+            ).fetchone()
+            if existing:
+                raise HTTPException(status_code=400, detail="A skin concern with this name already exists")
+
+            cur = conn.execute(
+                "INSERT INTO skin_concerns (name, slug, sort_order) VALUES (?, ?, ?)",
+                (name, slug, sort_order),
+            )
+            conn.commit()
+            concern = conn.execute(
+                "SELECT * FROM skin_concerns WHERE id = ?", (cur.lastrowid,)
+            ).fetchone()
+            return dict(concern)
+        finally:
+            conn.close()
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(status_code=500, detail="Failed to create skin concern")
+
+
+@app.put("/api/skin-concerns/{concern_id}")
+async def update_skin_concern(concern_id: int, request: Request, admin_id: int = Depends(verify_token)):
+    try:
+        body = await request.json()
+        conn = get_db()
+        try:
+            existing = conn.execute(
+                "SELECT * FROM skin_concerns WHERE id = ?", (concern_id,)
+            ).fetchone()
+            if not existing:
+                raise HTTPException(status_code=404, detail="Skin concern not found")
+
+            name = body.get("name", existing["name"]).strip()
+            sort_order = body.get("sort_order", existing["sort_order"])
+
+            # Update slug if name changed
+            slug = existing["slug"]
+            if name != existing["name"]:
+                slug = _slugify(name)
+                dup = conn.execute(
+                    "SELECT id FROM skin_concerns WHERE slug = ? AND id != ?", (slug, concern_id)
+                ).fetchone()
+                if dup:
+                    raise HTTPException(status_code=400, detail="A skin concern with this name already exists")
+
+            conn.execute(
+                "UPDATE skin_concerns SET name=?, slug=?, sort_order=? WHERE id=?",
+                (name, slug, sort_order, concern_id),
+            )
+            conn.commit()
+            concern = conn.execute(
+                "SELECT * FROM skin_concerns WHERE id = ?", (concern_id,)
+            ).fetchone()
+            return dict(concern)
+        finally:
+            conn.close()
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(status_code=500, detail="Failed to update skin concern")
+
+
+@app.delete("/api/skin-concerns/{concern_id}")
+async def delete_skin_concern(concern_id: int, admin_id: int = Depends(verify_token)):
+    try:
+        conn = get_db()
+        try:
+            existing = conn.execute(
+                "SELECT id FROM skin_concerns WHERE id = ?", (concern_id,)
+            ).fetchone()
+            if not existing:
+                raise HTTPException(status_code=404, detail="Skin concern not found")
+
+            # Delete associations first
+            conn.execute(
+                "DELETE FROM product_skin_concerns WHERE skin_concern_id = ?", (concern_id,)
+            )
+            conn.execute("DELETE FROM skin_concerns WHERE id = ?", (concern_id,))
+            conn.commit()
+            return {"ok": True}
+        finally:
+            conn.close()
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(status_code=500, detail="Failed to delete skin concern")
+
+
+@app.patch("/api/skin-concerns/reorder")
+async def reorder_skin_concerns(request: Request, admin_id: int = Depends(verify_token)):
+    try:
+        body = await request.json()
+        ids = body.get("ids", [])
+        if not ids:
+            raise HTTPException(status_code=400, detail="No skin concern IDs provided")
+
+        conn = get_db()
+        try:
+            for i, cid in enumerate(ids):
+                conn.execute(
+                    "UPDATE skin_concerns SET sort_order = ? WHERE id = ?", (i, cid)
+                )
+            conn.commit()
+            return {"ok": True}
+        finally:
+            conn.close()
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(status_code=500, detail="Failed to reorder skin concerns")
+
+
+# ─── Product Skin Concerns ──────────────────────────────────────────────────
+
+
+@app.put("/api/products/{product_id}/skin-concerns")
+async def update_product_skin_concerns(product_id: int, request: Request, admin_id: int = Depends(verify_token)):
+    """Update the skin concerns associated with a product."""
+    try:
+        body = await request.json()
+        concern_ids = body.get("skin_concern_ids", [])
+
+        conn = get_db()
+        try:
+            # Verify product exists
+            existing = conn.execute(
+                "SELECT id FROM products WHERE id = ?", (product_id,)
+            ).fetchone()
+            if not existing:
+                raise HTTPException(status_code=404, detail="Product not found")
+
+            # Delete existing associations
+            conn.execute(
+                "DELETE FROM product_skin_concerns WHERE product_id = ?", (product_id,)
+            )
+
+            # Insert new associations
+            for cid in concern_ids:
+                conn.execute(
+                    "INSERT OR IGNORE INTO product_skin_concerns (product_id, skin_concern_id) VALUES (?, ?)",
+                    (product_id, cid),
+                )
+
+            conn.commit()
+
+            # Return updated concerns
+            concerns = conn.execute(
+                "SELECT sc.id, sc.name, sc.slug FROM skin_concerns sc "
+                "INNER JOIN product_skin_concerns psc ON sc.id = psc.skin_concern_id "
+                "WHERE psc.product_id = ? ORDER BY sc.sort_order",
+                (product_id,)
+            ).fetchall()
+            return {"skin_concerns": [dict(c) for c in concerns]}
+        finally:
+            conn.close()
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(status_code=500, detail="Failed to update product skin concerns")
 
 
 # ─── Pages Routes ───────────────────────────────────────────────────────────

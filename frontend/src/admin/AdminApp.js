@@ -2,6 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { useToast } from '../components/Toast';
 import AdminLogin from './AdminLogin';
 import ProductsManager from './ProductsManager';
+import CategoriesManager from './CategoriesManager';
+import SkinConcernsManager from './SkinConcernsManager';
 import PageBuilder from './PageBuilder';
 import OrdersPanel from './OrdersPanel';
 import SettingsPanel from './SettingsPanel';
@@ -9,6 +11,8 @@ import * as api from '../api';
 
 const TABS = [
   { id: 'products', label: 'Products', icon: '◆' },
+  { id: 'categories', label: 'Categories', icon: '▦' },
+  { id: 'concerns', label: 'Skin Concerns', icon: '◎' },
   { id: 'pages', label: 'Pages', icon: '◇' },
   { id: 'orders', label: 'Orders', icon: '▤' },
   { id: 'settings', label: 'Settings', icon: '⚙' },
@@ -55,6 +59,8 @@ export default function AdminApp() {
   const renderTab = () => {
     switch (activeTab) {
       case 'products': return <ProductsManager />;
+      case 'categories': return <CategoriesManager />;
+      case 'concerns': return <SkinConcernsManager />;
       case 'pages': return <PageBuilder />;
       case 'orders': return <OrdersPanel />;
       case 'settings': return <SettingsPanel />;

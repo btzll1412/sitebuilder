@@ -163,6 +163,27 @@ export default function ProductDetail({ settings }) {
       <div style={s.breadcrumb}>
         <Link to="/" style={s.breadcrumbLink}>Home</Link>
         <span style={s.breadcrumbSep}>/</span>
+        {product.parent_category_info && (
+          <>
+            <Link to={`/shop?category=${product.parent_category_info.id}`} style={s.breadcrumbLink}>
+              {product.parent_category_info.name}
+            </Link>
+            <span style={s.breadcrumbSep}>/</span>
+          </>
+        )}
+        {product.category_info ? (
+          <>
+            <Link to={`/shop?category=${product.category_info.id}`} style={s.breadcrumbLink}>
+              {product.category_info.name}
+            </Link>
+            <span style={s.breadcrumbSep}>/</span>
+          </>
+        ) : product.category ? (
+          <>
+            <span style={s.breadcrumbLink}>{product.category}</span>
+            <span style={s.breadcrumbSep}>/</span>
+          </>
+        ) : null}
         <span style={s.breadcrumbCurrent}>{product.name}</span>
       </div>
 
@@ -190,6 +211,20 @@ export default function ProductDetail({ settings }) {
             <div style={s.descriptionWrap}>
               <h3 style={s.descriptionTitle}>Description</h3>
               <p style={s.description}>{product.description}</p>
+            </div>
+          )}
+
+          {/* Skin Concerns Tags */}
+          {product.skin_concerns && product.skin_concerns.length > 0 && (
+            <div style={s.concernsWrap}>
+              <h3 style={s.concernsTitle}>Good for</h3>
+              <div style={s.concernsTags}>
+                {product.skin_concerns.map(concern => (
+                  <span key={concern.id} style={{ ...s.concernTag, borderColor: brand, color: brand }}>
+                    {concern.name}
+                  </span>
+                ))}
+              </div>
             </div>
           )}
 
@@ -267,12 +302,32 @@ export default function ProductDetail({ settings }) {
                 )}
               </div>
 
-              {/* Color Swatches */}
+              {/* Color Swatches / Image Thumbnails */}
               <div style={s.variantOptions}>
                 {product.variants.map((v, idx) => {
                   const isSelected = selectedVariant?.name === v.name;
                   const variantOutOfStock = (v.stock_qty || 0) <= 0;
-                  return (
+                  const displayAsImage = v.display_type === 'image' && v.image;
+
+                  return displayAsImage ? (
+                    // Image Thumbnail Display
+                    <button
+                      key={idx}
+                      onClick={() => handleVariantSelect(v)}
+                      title={variantOutOfStock ? `${v.name} - Out of Stock` : `${v.name} (${v.stock_qty} available)`}
+                      style={{
+                        ...s.variantImageThumb,
+                        opacity: variantOutOfStock ? 0.5 : 1,
+                        cursor: 'pointer',
+                        boxShadow: isSelected ? `0 0 0 3px ${brand}` : 'none',
+                        transform: isSelected ? 'scale(1.05)' : 'scale(1)',
+                      }}
+                    >
+                      <img src={v.image} alt={v.name} style={s.variantThumbImg} />
+                      {variantOutOfStock && <span style={s.outOfStockOverlay}>Out</span>}
+                    </button>
+                  ) : (
+                    // Color Swatch Display
                     <button
                       key={idx}
                       onClick={() => handleVariantSelect(v)}
@@ -508,6 +563,32 @@ const s = {
     lineHeight: 1.7,
     fontSize: '0.95rem',
   },
+  concernsWrap: {
+    marginBottom: 28,
+  },
+  concernsTitle: {
+    fontFamily: 'var(--font-body)',
+    fontSize: '0.8rem',
+    fontWeight: 600,
+    textTransform: 'uppercase',
+    letterSpacing: '0.08em',
+    color: 'var(--kiosk-text-secondary)',
+    marginBottom: 12,
+  },
+  concernsTags: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  concernTag: {
+    display: 'inline-block',
+    padding: '6px 14px',
+    fontSize: '0.8rem',
+    fontWeight: 500,
+    borderRadius: 20,
+    border: '1px solid',
+    background: 'transparent',
+  },
   variantWrap: {
     marginBottom: 28,
   },
@@ -623,6 +704,35 @@ const s = {
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  variantImageThumb: {
+    width: 56,
+    height: 56,
+    borderRadius: 'var(--radius-sm)',
+    border: '2px solid var(--kiosk-border)',
+    cursor: 'pointer',
+    transition: 'all 0.2s',
+    position: 'relative',
+    overflow: 'hidden',
+    padding: 0,
+    background: 'transparent',
+  },
+  variantThumbImg: {
+    width: '100%',
+    height: '100%',
+    objectFit: 'cover',
+  },
+  outOfStockOverlay: {
+    position: 'absolute',
+    inset: 0,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    background: 'rgba(0,0,0,0.6)',
+    color: '#fff',
+    fontSize: '0.65rem',
+    fontWeight: 600,
+    textTransform: 'uppercase',
   },
   outOfStockLine: {
     position: 'absolute',

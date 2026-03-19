@@ -71,17 +71,91 @@ export async function changePassword(password) {
 
 // ─── Products ───────────────────────────────────────────────────────────────
 
-export async function getProducts(category) {
-  const params = category && category !== 'all' ? `?category=${encodeURIComponent(category)}` : '';
-  return request(`/api/products${params}`);
+export async function getProducts(options = {}) {
+  const params = new URLSearchParams();
+  if (options.category && options.category !== 'all') {
+    params.append('category', options.category);
+  }
+  if (options.category_id) {
+    params.append('category_id', options.category_id);
+  }
+  if (options.include_subcategories) {
+    params.append('include_subcategories', 'true');
+  }
+  if (options.skin_concerns) {
+    params.append('skin_concerns', options.skin_concerns);
+  }
+  if (options.search) {
+    params.append('search', options.search);
+  }
+  const queryString = params.toString();
+  return request(`/api/products${queryString ? `?${queryString}` : ''}`);
 }
 
 export async function getAllProducts() {
   return request('/api/products/all');
 }
 
-export async function getCategories() {
+export async function searchProducts(query) {
+  if (!query || query.length < 2) return [];
+  return request(`/api/products/search?q=${encodeURIComponent(query)}`);
+}
+
+export async function getProductCategories() {
+  // Legacy - gets distinct categories from products
   return request('/api/products/categories');
+}
+
+// ─── Categories (Hierarchical) ─────────────────────────────────────────────
+
+export async function getCategories() {
+  return request('/api/categories');
+}
+
+export async function getCategoriesTree() {
+  return request('/api/categories/tree');
+}
+
+export async function createCategory(data) {
+  return requestWithBody('/api/categories', data);
+}
+
+export async function updateCategory(id, data) {
+  return requestWithBody(`/api/categories/${id}`, data, 'PUT');
+}
+
+export async function deleteCategory(id) {
+  return request(`/api/categories/${id}`, { method: 'DELETE' });
+}
+
+export async function reorderCategories(ids) {
+  return requestWithBody('/api/categories/reorder', { ids }, 'PATCH');
+}
+
+// ─── Skin Concerns ─────────────────────────────────────────────────────────
+
+export async function getSkinConcerns() {
+  return request('/api/skin-concerns');
+}
+
+export async function createSkinConcern(data) {
+  return requestWithBody('/api/skin-concerns', data);
+}
+
+export async function updateSkinConcern(id, data) {
+  return requestWithBody(`/api/skin-concerns/${id}`, data, 'PUT');
+}
+
+export async function deleteSkinConcern(id) {
+  return request(`/api/skin-concerns/${id}`, { method: 'DELETE' });
+}
+
+export async function reorderSkinConcerns(ids) {
+  return requestWithBody('/api/skin-concerns/reorder', { ids }, 'PATCH');
+}
+
+export async function updateProductSkinConcerns(productId, concernIds) {
+  return requestWithBody(`/api/products/${productId}/skin-concerns`, { skin_concern_ids: concernIds }, 'PUT');
 }
 
 export async function getProduct(id) {
