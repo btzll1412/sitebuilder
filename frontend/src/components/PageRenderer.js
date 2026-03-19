@@ -25,6 +25,8 @@ function canAddFromGrid(product) {
 }
 
 export default function PageRenderer({ blocks, settings }) {
+  const [pageSearchQuery, setPageSearchQuery] = useState('');
+
   if (!blocks || blocks.length === 0) {
     return (
       <div style={{ textAlign: 'center', padding: '120px 24px', color: 'var(--kiosk-text-secondary)' }}>
@@ -37,7 +39,12 @@ export default function PageRenderer({ blocks, settings }) {
     <div>
       {blocks.map((block, i) => (
         <AnimatedBlock key={block.id || i} index={i}>
-          <RenderBlock block={block} settings={settings} />
+          <RenderBlock
+            block={block}
+            settings={settings}
+            pageSearchQuery={pageSearchQuery}
+            setPageSearchQuery={setPageSearchQuery}
+          />
         </AnimatedBlock>
       ))}
     </div>
@@ -73,16 +80,17 @@ function AnimatedBlock({ children, index }) {
   );
 }
 
-function RenderBlock({ block, settings }) {
+function RenderBlock({ block, settings, pageSearchQuery, setPageSearchQuery }) {
   const { type, props } = block;
   const p = props || {};
   const brand = settings?.primary_color || '#C2185B';
 
   switch (type) {
     case 'hero': return <HeroBlock p={p} brand={brand} />;
-    case 'product_grid': return <ProductGridBlock p={p} brand={brand} />;
-    case 'featured_products': return <FeaturedProductsBlock p={p} brand={brand} />;
-    case 'category_shop': return <CategoryShopBlock p={p} brand={brand} />;
+    case 'search_bar': return <SearchBarBlock p={p} brand={brand} searchQuery={pageSearchQuery} setSearchQuery={setPageSearchQuery} />;
+    case 'product_grid': return <ProductGridBlock p={p} brand={brand} searchQuery={pageSearchQuery} />;
+    case 'featured_products': return <FeaturedProductsBlock p={p} brand={brand} searchQuery={pageSearchQuery} />;
+    case 'category_shop': return <CategoryShopBlock p={p} brand={brand} searchQuery={pageSearchQuery} />;
     case 'text': return <TextBlock p={p} />;
     case 'buttons': return <ButtonsBlock p={p} brand={brand} />;
     case 'banner': return <BannerBlock p={p} />;
@@ -207,13 +215,89 @@ function HeroBlock({ p, brand }) {
   );
 }
 
+// ─── Search Bar Block ──────────────────────────────────────────────────────
+
+function SearchBarBlock({ p, brand, searchQuery, setSearchQuery }) {
+  return (
+    <section style={{
+      padding: '24px 40px',
+      maxWidth: 800,
+      margin: '0 auto',
+      background: p.bg_color || 'transparent',
+    }}>
+      <div style={{ position: 'relative' }}>
+        <input
+          type="text"
+          value={searchQuery}
+          onChange={e => setSearchQuery(e.target.value)}
+          placeholder={p.placeholder || 'Search products...'}
+          style={{
+            width: '100%',
+            padding: '18px 50px 18px 24px',
+            fontSize: '1.1rem',
+            border: '2px solid var(--kiosk-border)',
+            borderRadius: 'var(--radius-lg)',
+            background: 'var(--kiosk-card)',
+            color: 'var(--kiosk-text)',
+            outline: 'none',
+            transition: 'border-color 0.2s',
+          }}
+          onFocus={e => e.target.style.borderColor = brand}
+          onBlur={e => e.target.style.borderColor = 'var(--kiosk-border)'}
+        />
+        {searchQuery ? (
+          <button
+            onClick={() => setSearchQuery('')}
+            style={{
+              position: 'absolute',
+              right: 16,
+              top: '50%',
+              transform: 'translateY(-50%)',
+              width: 32,
+              height: 32,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              fontSize: '1rem',
+              color: 'var(--kiosk-text-secondary)',
+              background: 'var(--kiosk-elevated)',
+              border: 'none',
+              borderRadius: '50%',
+              cursor: 'pointer',
+            }}
+          >
+            ✕
+          </button>
+        ) : (
+          <span style={{
+            position: 'absolute',
+            right: 20,
+            top: '50%',
+            transform: 'translateY(-50%)',
+            fontSize: '1.2rem',
+            color: 'var(--kiosk-text-hint)',
+            pointerEvents: 'none',
+          }}>
+            🔍
+          </span>
+        )}
+      </div>
+    </section>
+  );
+}
+
 // ─── Product Grid Block ────────────────────────────────────────────────────
 
-function ProductGridBlock({ p, brand }) {
+function ProductGridBlock({ p, brand, searchQuery = '' }) {
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [addedId, setAddedId] = useState(null);
   const { addItem, items: cartItems } = useCart();
+
+  // Filter products by search query
+  const filteredProducts = searchQuery.trim()
+    ? products.filter(prod => prod.name.toLowerCase().includes(searchQuery.toLowerCase()))
+    : products;
 
   useEffect(() => {
     const options = {};
@@ -271,15 +355,17 @@ function ProductGridBlock({ p, brand }) {
           {p.title}
         </h2>
       )}
-      {products.length === 0 ? (
-        <p style={{ textAlign: 'center', color: 'var(--kiosk-text-secondary)' }}>No products found.</p>
+      {filteredProducts.length === 0 ? (
+        <p style={{ textAlign: 'center', color: 'var(--kiosk-text-secondary)' }}>
+          {searchQuery ? 'No products match your search.' : 'No products found.'}
+        </p>
       ) : (
         <div style={{
           display: 'grid',
           gridTemplateColumns: `repeat(${p.columns || 3}, 1fr)`,
           gap: 24,
         }}>
-          {products.map(product => (
+          {filteredProducts.map(product => (
             <ProductCard key={product.id} product={product} brand={brand} onAdd={() => handleAdd(product)} justAdded={addedId === product.id} cartItems={cartItems} />
           ))}
         </div>
@@ -452,11 +538,16 @@ function ProductCard({ product, brand, onAdd, justAdded, cartItems = [] }) {
 
 // ─── Featured Products Block ──────────────────────────────────────────────
 
-function FeaturedProductsBlock({ p, brand }) {
+function FeaturedProductsBlock({ p, brand, searchQuery = '' }) {
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [addedId, setAddedId] = useState(null);
   const { addItem, items: cartItems } = useCart();
+
+  // Filter products by search query
+  const filteredProducts = searchQuery.trim()
+    ? products.filter(prod => prod.name.toLowerCase().includes(searchQuery.toLowerCase()))
+    : products;
 
   useEffect(() => {
     if (!p.product_ids || p.product_ids.length === 0) {
@@ -503,6 +594,26 @@ function FeaturedProductsBlock({ p, brand }) {
     return null;
   }
 
+  if (filteredProducts.length === 0 && searchQuery) {
+    return (
+      <section style={{ padding: '80px 40px', maxWidth: 1200, margin: '0 auto' }}>
+        {p.title && (
+          <h2 style={{
+            fontFamily: 'var(--font-display)',
+            fontSize: '2rem',
+            fontWeight: 400,
+            color: 'var(--kiosk-text)',
+            textAlign: 'center',
+            marginBottom: 48,
+          }}>
+            {p.title}
+          </h2>
+        )}
+        <p style={{ textAlign: 'center', color: 'var(--kiosk-text-secondary)' }}>No products match your search.</p>
+      </section>
+    );
+  }
+
   return (
     <section style={{ padding: '80px 40px', maxWidth: 1200, margin: '0 auto' }}>
       {p.title && (
@@ -523,7 +634,7 @@ function FeaturedProductsBlock({ p, brand }) {
         gridTemplateColumns: `repeat(${p.columns || 3}, 1fr)`,
         gap: 24,
       }}>
-        {products.map(product => (
+        {filteredProducts.map(product => (
           <ProductCard key={product.id} product={product} brand={brand} onAdd={() => handleAdd(product)} justAdded={addedId === product.id} cartItems={cartItems} />
         ))}
       </div>
@@ -533,7 +644,7 @@ function FeaturedProductsBlock({ p, brand }) {
 
 // ─── Category Shop Block ───────────────────────────────────────────────────
 
-function CategoryShopBlock({ p, brand }) {
+function CategoryShopBlock({ p, brand, searchQuery = '' }) {
   const [products, setProducts] = useState([]);
   const [categories, setCategories] = useState([]);
   const [activeCategory, setActiveCategory] = useState('');
@@ -606,8 +717,13 @@ function CategoryShopBlock({ p, brand }) {
     setTimeout(() => setAddedId(null), 1500);
   };
 
+  // Filter products by search query first
+  const filteredProducts = searchQuery.trim()
+    ? products.filter(prod => prod.name.toLowerCase().includes(searchQuery.toLowerCase()))
+    : products;
+
   const productsByCategory = categories.reduce((acc, cat) => {
-    acc[cat] = products.filter(prod => prod.category === cat);
+    acc[cat] = filteredProducts.filter(prod => prod.category === cat);
     return acc;
   }, {});
 

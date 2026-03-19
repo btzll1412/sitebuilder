@@ -4,6 +4,7 @@ import * as api from '../api';
 
 const BLOCK_TYPES = [
   { type: 'hero', label: 'Hero Banner', icon: '▮', desc: 'Full-width banner with title, subtitle, CTA' },
+  { type: 'search_bar', label: 'Search Bar', icon: '🔍', desc: 'Search input to filter products on this page' },
   { type: 'product_grid', label: 'Product Grid', icon: '▦', desc: 'Grid of product cards from your store' },
   { type: 'featured_products', label: 'Featured Products', icon: '★', desc: 'Hand-pick specific products to display' },
   { type: 'category_shop', label: 'Category Shop', icon: '◫', desc: 'Full shop with category sidebar navigation' },
@@ -25,6 +26,7 @@ function uid() {
 function defaultProps(type) {
   switch (type) {
     case 'hero': return { title: 'Your Heading', subtitle: 'A compelling subtitle goes here.', cta: 'Shop Now', cta_link: '/shop', cta2: '', cta2_link: '', badge: '', bg_color: '#0d0d0d', bg_image: '' };
+    case 'search_bar': return { placeholder: 'Search products...', bg_color: '' };
     case 'product_grid': return { title: 'Products', category: 'all', limit: 6, columns: 3 };
     case 'featured_products': return { title: 'Featured', product_ids: [], columns: 3 };
     case 'category_shop': return { title: 'Shop Our Collection', show_sidebar: true };
@@ -613,6 +615,14 @@ function BlockEditor({ block, onUpdate }) {
           {field('Background Color', 'bg_color', 'color')}
           {field('Background Image URL', 'bg_image')}
         </div>
+      </>);
+    case 'search_bar':
+      return (<>
+        {field('Placeholder Text', 'placeholder')}
+        {field('Background Color (optional)', 'bg_color', 'color')}
+        <p style={{ fontSize: '0.8rem', color: 'var(--admin-text-hint)', marginTop: 8 }}>
+          This search bar will filter all product grids on this page as customers type.
+        </p>
       </>);
     case 'product_grid':
       return (<>
