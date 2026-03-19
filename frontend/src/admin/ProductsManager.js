@@ -14,6 +14,7 @@ export default function ProductsManager() {
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [filterCategory, setFilterCategory] = useState('all');
+  const [searchQuery, setSearchQuery] = useState('');
   const [categories, setCategories] = useState([]);
   const [categoriesTree, setCategoriesTree] = useState([]);
   const [skinConcerns, setSkinConcerns] = useState([]);
@@ -44,9 +45,16 @@ export default function ProductsManager() {
 
   useEffect(() => { loadProducts(); }, [loadProducts]);
 
-  const filtered = filterCategory === 'all'
-    ? products
-    : products.filter(p => p.category === filterCategory);
+  // Filter by category, search, and sort alphabetically
+  const filtered = products
+    .filter(p => filterCategory === 'all' || p.category === filterCategory)
+    .filter(p => {
+      if (!searchQuery.trim()) return true;
+      const q = searchQuery.toLowerCase();
+      return p.name.toLowerCase().includes(q) ||
+             (p.description || '').toLowerCase().includes(q);
+    })
+    .sort((a, b) => a.name.localeCompare(b.name));
 
   const handleDelete = async (id) => {
     if (!window.confirm('Delete this product?')) return;
@@ -139,6 +147,20 @@ export default function ProductsManager() {
         >
           + Add Product
         </button>
+      </div>
+
+      {/* Search Bar */}
+      <div style={styles.searchWrap}>
+        <input
+          type="text"
+          value={searchQuery}
+          onChange={e => setSearchQuery(e.target.value)}
+          placeholder="Search products..."
+          style={styles.searchInput}
+        />
+        {searchQuery && (
+          <button onClick={() => setSearchQuery('')} style={styles.searchClear}>✕</button>
+        )}
       </div>
 
       {/* Filters & Bulk Actions */}
@@ -780,6 +802,37 @@ const styles = {
     borderRadius: 'var(--radius-md)',
     transition: 'background 0.15s',
     minHeight: 44,
+  },
+  searchWrap: {
+    position: 'relative',
+    marginBottom: 20,
+  },
+  searchInput: {
+    width: '100%',
+    padding: '14px 44px 14px 18px',
+    fontSize: '0.95rem',
+    border: '1.5px solid var(--admin-border)',
+    borderRadius: 'var(--radius-md)',
+    background: 'var(--admin-card)',
+    color: 'var(--admin-text)',
+    outline: 'none',
+  },
+  searchClear: {
+    position: 'absolute',
+    right: 12,
+    top: '50%',
+    transform: 'translateY(-50%)',
+    width: 28,
+    height: 28,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    fontSize: '0.85rem',
+    color: 'var(--admin-text-hint)',
+    background: 'transparent',
+    border: 'none',
+    borderRadius: '50%',
+    cursor: 'pointer',
   },
   toolbar: {
     display: 'flex',
