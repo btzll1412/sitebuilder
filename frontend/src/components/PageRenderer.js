@@ -223,7 +223,6 @@ function SearchBarBlock({ p, brand, searchQuery, setSearchQuery }) {
       padding: '24px 40px',
       maxWidth: 800,
       margin: '0 auto',
-      background: p.bg_color || 'transparent',
     }}>
       <div style={{ position: 'relative' }}>
         <input
@@ -237,7 +236,7 @@ function SearchBarBlock({ p, brand, searchQuery, setSearchQuery }) {
             fontSize: '1.1rem',
             border: '2px solid var(--kiosk-border)',
             borderRadius: 'var(--radius-lg)',
-            background: 'var(--kiosk-card)',
+            background: p.bg_color || 'var(--kiosk-card)',
             color: 'var(--kiosk-text)',
             outline: 'none',
             transition: 'border-color 0.2s',
