@@ -605,6 +605,14 @@ async def get_all_products(admin_id: int = Depends(verify_token)):
             for r in rows:
                 d = dict(r)
                 d["variants"] = json.loads(d.get("variants") or "[]")
+                # Fetch skin concerns for this product
+                concerns = conn.execute(
+                    """SELECT sc.id, sc.name, sc.slug FROM skin_concerns sc
+                       JOIN product_skin_concerns psc ON sc.id = psc.skin_concern_id
+                       WHERE psc.product_id = ?""",
+                    (r["id"],)
+                ).fetchall()
+                d["skin_concerns"] = [dict(c) for c in concerns]
                 results.append(d)
             return results
         finally:
