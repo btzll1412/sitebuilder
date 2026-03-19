@@ -889,6 +889,25 @@ function BlockPreview({ block }) {
           {p.cta && <span style={{ display: 'inline-block', padding: '14px 36px', background: '#C2185B', color: '#fff', borderRadius: 8, fontWeight: 600, fontSize: '0.9rem' }}>{p.cta}</span>}
         </div>
       );
+    case 'search_bar':
+      return (
+        <div style={{ padding: '24px 40px', background: '#0d0d0d', maxWidth: 600, margin: '0 auto' }}>
+          <div style={{
+            padding: '16px 20px',
+            background: p.bg_color || '#1c1c1c',
+            borderRadius: 12,
+            border: '2px solid #2a2a2a',
+            color: '#666',
+            fontSize: '1rem',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+          }}>
+            <span>{p.placeholder || 'Search products...'}</span>
+            <span>🔍</span>
+          </div>
+        </div>
+      );
     case 'product_grid':
       return (
         <div style={{ padding: '60px 40px', background: '#0d0d0d' }}>
