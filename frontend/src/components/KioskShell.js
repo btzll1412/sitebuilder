@@ -4,6 +4,7 @@ import Navbar from './Navbar';
 import CartDrawer from './CartDrawer';
 import PageRenderer from './PageRenderer';
 import ProductDetail from './ProductDetail';
+import ShopPage from './ShopPage';
 import IdleTimeout from './IdleTimeout';
 import * as api from '../api';
 
@@ -55,6 +56,7 @@ export default function KioskShell() {
       <Navbar settings={settings} pages={pages} />
       <Routes>
         <Route path="/" element={<PageView slug="home" settings={settings} silentRefresh={silentRefresh} />} />
+        <Route path="/shop" element={<ShopPage settings={settings} />} />
         <Route path="/product/:id" element={<ProductDetail settings={settings} />} />
         <Route path="/:slug" element={<PageViewFromParams settings={settings} silentRefresh={silentRefresh} />} />
       </Routes>
